@@ -1,314 +1,228 @@
 # Development Guide
 
-Detailed technical reference for contributors and developers. For a quick overview and setup instructions, see the root [README](../README.md).
+Technical reference for contributors working on Recommendle.
+For clone-to-run setup, use the root `README.md`.
 
 ---
 
-## Design Philosophy
+## 1. Current Capability Snapshot
 
-### Goal
+### Implemented
+- Mongo-first backend (`app.main_mongo`) with category-aware gameplay.
+- Full fountain pen flow:
+  - onboarding pool of 50
+  - select exactly 10
+  - set-level rating
+  - 5 game rounds, 10 candidates per round
+  - round scoring + final summary
+- Movie category support (when ingested) via TMDB script.
+- Hidden preference detection + hidden gem recommendations.
+- Category-scoped leaderboard and player history.
+- Light/dark mode UI and per-theme logo handling.
+- Backend unit tests for category features and hidden preference behavior.
 
-Model **sequential preferences** as users assemble a set of products. The system collects **prefix ratings** (rate the set so far, not individual items) and uses a lightweight **prefix-based collaborative filtering** model to predict and recommend the next items.
-
-### UI Concepts
-
-- **Rate the set so far**: prefix ratings are captured after onboarding, not per-item.
-- **Left brain vs. right brain**: a mode toggle switches between image-first exploration and feature-first exploration.
-- **Diversity**: onboarding and round candidates mix top-likelihood picks with wildcard/decoy items.
-
-### Visual Style
-
-- Clean, responsive layouts with a restrained color palette.
-- Dark-mode-friendly deep navy backgrounds with vibrant accent gradients.
-- Typography: modern sans-serif stack.
-
----
-
-## MongoDB Data Model
-
-### Products Collection
-
-```javascript
-{
-  "_id": ObjectId("..."),
-  "source_id": "goulet-pens-123",
-  "title": "TWSBI Eco",
-  "vendor": "TWSBI",
-  "product_type": "Fountain Pen",
-  "price_min": 34.00,
-  "price_max": 38.00,
-  "currency": "USD",
-  "tags": ["demonstrator", "piston-fill"],
-  "options": {
-    "color": ["Clear", "Blue", "Carmine"],
-    "nib": ["EF", "F", "M", "B", "Stub"]
-  },
-  "description": "...",
-  "url": "https://...",
-  "images": [
-    { "url": "https://...", "alt": "TWSBI Eco front view", "position": 0 }
-  ],
-  "created_at": ISODate("...")
-}
-```
-
-### Users Collection
-
-```javascript
-{
-  "_id": ObjectId("..."),
-  "name": "John Doe",
-  "sessions": [ObjectId("...")],
-  "created_at": ISODate("...")
-}
-```
-
-### Sessions Collection
-
-```javascript
-{
-  "_id": ObjectId("..."),
-  "user_id": ObjectId("..."),
-  "state": {
-    "user_vec": [0.1, 0.2, ...],
-    "bias": 0.5,
-    "count": 3
-  },
-  "selections": [ObjectId("...")],
-  "prefix_ratings": [ObjectId("...")],
-  "created_at": ISODate("...")
-}
-```
-
-### Selections Collection
-
-```javascript
-{
-  "_id": ObjectId("..."),
-  "session_id": ObjectId("..."),
-  "product_id": ObjectId("..."),
-  "is_exception": false,
-  "created_at": ISODate("...")
-}
-```
-
-### Prefix Ratings Collection
-
-```javascript
-{
-  "_id": ObjectId("..."),
-  "session_id": ObjectId("..."),
-  "rating": 4,
-  "tags": ["demonstrator", "piston-fill"],
-  "created_at": ISODate("...")
-}
-```
-
-### Indexes
-
-Created automatically by the migration/load scripts:
-
-- `products.source_id` (unique)
-- `products.title`
-- `products.vendor`
-- `users.name`
-
-Additional indexes to add for performance:
-
-```javascript
-db.products.createIndex({ "price_min": 1 })
-db.products.createIndex({ "tags": 1 })
-db.sessions.createIndex({ "user_id": 1 })
-db.selections.createIndex({ "session_id": 1 })
-```
+### In Progress / Optional
+- Large-scale movie ingestion completion depends on valid TMDB key and runtime.
+- Legacy SQLite path remains for compatibility, but is not the default runtime path.
 
 ---
 
-## Legacy API Endpoints (Recommendation Mode)
+## 2. Runtime Architecture
 
-These endpoints power the original recommendation UI (non-game mode):
+### Active app path
+- Backend entrypoint: `backend/app/main_mongo.py`
+- Frontend dev server: Vite (`frontend`)
+- Database: MongoDB
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/products` | List products (with filtering) |
-| `GET` | `/api/products/{id}` | Get a specific product |
-| `POST` | `/api/users` | Create a user |
-| `POST` | `/api/sessions` | Create a session |
-| `POST` | `/api/sessions/{id}/select` | Select a product |
-| `POST` | `/api/sessions/{id}/rate` | Rate the current prefix |
-| `GET` | `/api/sessions/{id}/recommendations` | Get recommendations |
-| `GET` | `/api/sessions/{id}/selections` | Get selections |
-| `GET` | `/api/debug/pbcf` | View PBCF model statistics |
+### Legacy compatibility path
+- SQLite backend entrypoint: `backend/app/main.py`
+- Kept for old workflows and migration support only.
+
+### Request flow (active mode)
+1. React frontend calls `/api/game/*`.
+2. FastAPI game routes in `backend/app/routes/game.py`.
+3. Game logic in `backend/app/services/game_service.py`.
+4. Model and feature-space logic in `backend/app/ml/prefix_cf.py`.
+5. Data read/write through Mongo collections.
 
 ---
 
-## Evaluation (AI Performance Analysis)
+## 3. Data Model (MongoDB)
 
-The evaluation script analyzes **real completed game data** from MongoDB to measure how well the AI predicts player choices.
+Primary collections:
+- `products`
+- `users`
+- `sessions`
+- `selections`
+- `prefix_ratings`
+- `games`
+- `game_rounds`
 
-### Prerequisites
+Category-aware product docs include `category` and `schema_version`.
 
-- MongoDB running with at least one completed game in the database.
-- Play a full game at `http://localhost:5173` first.
+Current categories:
+- `fountain_pens`
+- `movies`
 
-### Run the Evaluation
+Startup schema validation:
+- `backend/app/services/schema_service.py` ensures required category fields/indexes exist.
+- If products are missing `category`, startup fails and asks you to run migration.
 
+---
+
+## 4. API Surface (Current)
+
+### Game APIs (primary)
+- `GET /api/game/categories`
+- `POST /api/game/start`
+- `GET /api/game/{game_id}/onboarding`
+- `POST /api/game/{game_id}/onboarding/submit`
+- `POST /api/game/{game_id}/round/start`
+- `POST /api/game/{game_id}/round/{round_number}/pick`
+- `GET /api/game/{game_id}/status`
+- `GET /api/game/{game_id}/summary`
+- `GET /api/game/leaderboard`
+- `GET /api/game/player/{player_name}/history`
+
+### Legacy recommendation APIs (still present)
+- `/api/products`
+- `/api/users`
+- `/api/sessions/*`
+- `/api/debug/pbcf`
+
+---
+
+## 5. ML / Recommendation Behavior
+
+Core model:
+- Prefix-based collaborative filtering with category-aware feature extraction.
+- User vector updates after onboarding and each round pick.
+- Round candidates combine high-likelihood and diversity picks.
+
+Explainability:
+- AI top candidate list and reason text per round.
+- Learned preference/dislike features in final summary.
+
+Hidden preference pipeline:
+1. Compare learned feature weights vs selection frequency.
+2. Detect latent features not explicitly targeted.
+3. Generate hidden gem recommendations from latent dimensions.
+
+---
+
+## 6. Script Catalog (What to Run and Why)
+
+Run all commands below from `backend/` unless noted.
+
+### Required for normal clone setup
+- Load pens into Mongo:
+  - `python -m scripts.load_db`
+  - Default target is MongoDB.
+
+### Optional / advanced
+- Load pens into legacy SQLite:
+  - `python -m scripts.load_db --target sqlite`
+- Ingest movies from TMDB:
+  - `python -m scripts.ingest_movies_tmdb --max-movies 50000`
+  - Uses checkpoint file: `backend/data/tmdb_ingest_checkpoint.json`
+- Multi-category schema migration:
+  - `python -m scripts.migrate_multicategory_schema`
+- SQLite to Mongo migration:
+  - `python -m scripts.migrate_to_mongo`
+  - Warning: this script drops/rebuilds core Mongo collections.
+- Model evaluation reports:
+  - `python -m scripts.evaluate_pbcf`
+
+---
+
+## 7. Developer Workflows
+
+### First run (fresh clone)
+1. Install backend deps: `python -m pip install -r requirements.txt`
+2. Copy env file from `.env.example` to `.env`.
+3. Ensure MongoDB is running.
+4. Load pens: `python -m scripts.load_db`
+5. Start backend: `python -m uvicorn app.main_mongo:app --host localhost --port 8015 --reload`
+6. In `frontend/`: `npm install && npm run dev`
+
+### Reset and reload data safely
+1. Drop relevant Mongo collections if needed.
+2. Reload pens: `python -m scripts.load_db`
+3. Optionally ingest movies again.
+
+### Resume paused movie ingest
+- Re-run same command:
+  - `python -m scripts.ingest_movies_tmdb --max-movies 50000`
+- Script resumes from checkpoint automatically.
+
+---
+
+## 8. Testing and Validation
+
+### Backend unit tests
 ```bash
 cd backend
-python -m scripts.evaluate_pbcf
+python -m unittest discover -s tests -v
 ```
 
-### Reports Generated
+### Backend compile sanity
+```bash
+cd backend
+python -m compileall app scripts tests
+```
 
-Artifacts are saved to `backend/reports/` (git-ignored, generated locally):
+### Frontend build verification
+```bash
+cd frontend
+npm run build
+```
 
-| File | Description |
-|------|-------------|
-| `evaluation_summary.txt` | Full text report with all metrics |
-| `evaluation_data.json` | Raw metrics as JSON for programmatic use |
-| `ai_accuracy_by_round.png` | Bar chart: does the AI improve over 10 rounds? |
-| `score_distribution.png` | Human vs AI scores per game + delta histogram |
-| `learning_metrics.png` | Coherence & predicted prefix rating evolution |
-
-### Metrics Tracked
-
-- **Overall AI accuracy** — what percentage of rounds does the AI correctly predict the human's pick?
-- **AI accuracy by round** — the core learning curve: does the AI get better as it learns more about you?
-- **Game outcomes** — human wins vs AI wins vs ties, average scores.
-- **AI rank analysis** — when the AI is wrong, where did your pick rank in its candidate list?
-- **Model learning metrics** — how coherence score and predicted prefix rating evolve across rounds.
-
----
-
-## Testing
-
-### API Smoke Test
-
+### API smoke script
 ```bash
 bash test_game_api.sh
 ```
 
-### Frontend Functional Checklist
-
-- [ ] Welcome screen accepts player name and starts session.
-- [ ] Onboarding loads exactly 50 products.
-- [ ] User can select up to 10 products (not more).
-- [ ] Continue button is enabled only at 10 selections.
-- [ ] Rating modal submits successfully.
-- [ ] Round start loads exactly 10 candidates.
-- [ ] User can lock one pick per round.
-- [ ] Result screen shows human pick, AI pick, round points, post-round metrics, and AI top candidate list.
-- [ ] Hidden Patterns Emerging section appears when hidden preferences are detected (typically round 3+).
-- [ ] Flow advances through all 10 rounds.
-- [ ] Final summary shows final scores and leaderboard.
-- [ ] Hidden Gems panel shows detected latent features, narrative explanation, and gem product recommendations.
-
-### API Validation Checklist
-
-- [ ] `POST /api/game/start` returns `status: onboarding`.
-- [ ] `GET /api/game/{id}/onboarding` returns `pool_size: 50`.
-- [ ] Invalid onboarding payloads return `400`.
-- [ ] Valid onboarding submit returns `accepted: true`.
-- [ ] `POST /api/game/{id}/round/start` returns 10 candidates.
-- [ ] `POST /api/game/{id}/round/{n}/pick` updates cumulative scores.
-- [ ] `GET /api/game/{id}/status` reflects round progression.
-- [ ] `GET /api/game/leaderboard` returns completed games only.
-
-### Build Verification
-
-```bash
-cd frontend && npm run build
-```
-
-Then open `http://localhost:8015` and verify the React app is served from `frontend/dist`.
+Note:
+- The smoke script assumes backend is running on port `8015`.
 
 ---
 
-## Troubleshooting
+## 9. Common Issues
 
-### MongoDB Connection Failed
+### Pens not visible after clone
+Cause:
+- Mongo has no fountain pen docs yet.
+Fix:
+- Run `python -m scripts.load_db` (Mongo default).
 
-```
-pymongo.errors.ServerSelectionTimeoutError: No servers found
-```
+### Movie category disabled / ingest required
+Cause:
+- Fewer than 50 movie products loaded.
+Fix:
+- Complete TMDB ingest or seed enough movie docs.
 
-Make sure MongoDB is running:
+### Startup error about missing `category`
+Cause:
+- Old product docs without schema/category fields.
+Fix:
+- Run `python -m scripts.migrate_multicategory_schema`.
 
-```bash
-mongosh --eval "db.adminCommand('ping')"
-```
-
-If not running, start it:
-
-- **Windows**: Run as a service or `mongod --dbpath C:\data\db`
-- **Mac**: `brew services start mongodb-community`
-- **Linux**: `mongod`
-
-### Resetting the Database
-
-Drop all collections and reload:
-
-```javascript
-use decidio
-db.products.drop()
-db.users.drop()
-db.sessions.drop()
-db.selections.drop()
-db.prefix_ratings.drop()
-```
-
-Then re-run `python -m scripts.load_db`.
-
-### SQLite Fallback
-
-The original SQLite backend is still available:
-
-```bash
-cd backend
-python -m uvicorn app.main:app --reload --port 8015
-```
-
-The SQLite database is at `data/decidio.db`.
+### Mongo connection failure
+Check:
+- Mongo service is running.
+- `MONGODB_URL` / `MONGODB_DB_NAME` in `backend/.env`.
 
 ---
 
-## Hidden Preference Detection
+## 10. Limitations and Next Priorities
 
-The hidden preference system identifies features the user accumulated incidentally (via co-occurrence) rather than intentionally.
+### Current limitations
+- No auth/user accounts for production identity.
+- Legacy SQLite code still exists and can confuse new contributors.
+- Recommendation quality depends on dataset size and quality.
 
-### Algorithm
-
-1. **Build a selection-frequency vector** — for each feature dimension, count how many of the user's selected products activate that dimension, then normalize to 0–1.
-2. **Normalize the user vector** — scale the model's learned `user_vec` to 0–1.
-3. **Compute latency score** — `latency[i] = normalized_weight[i] − frequency[i]`. High latency means the model learned to value a feature the user didn't directly target.
-4. **Filter** — only features with `weight ≥ 0.15`, `latency ≥ 0.10`, and `≥ 3` selections qualify. Price dimensions are excluded.
-5. **Hidden Gem products** — a masked user vector (zeroing out non-hidden dimensions) is used to score all products; those not already selected are returned as gem recommendations.
-
-### Thresholds (tunable in `prefix_cf.py`)
-
-| Constant | Default | Purpose |
-|----------|---------|--------|
-| `HIDDEN_MIN_WEIGHT` | 0.08 | Minimum normalized weight to consider a feature |
-| `HIDDEN_MIN_LATENCY` | 0.05 | Minimum gap between weight and selection frequency |
-| `HIDDEN_MIN_SELECTIONS` | 2 | Minimum selections before detection activates |
-
-### Files Involved
-
-| File | Role |
-|------|------|
-| `backend/app/ml/prefix_cf.py` | `detect_hidden_preferences()`, `get_hidden_gem_products()` |
-| `backend/app/services/game_service.py` | Integration in `submit_pick()` (progressive hints) and `get_game_summary()` (full reveal) |
-| `backend/app/schemas_game.py` | Response schemas for hidden preference data |
-| `frontend/src/components/RoundResultPanel.jsx` | "Hidden Patterns Emerging" per-round UI |
-| `frontend/src/components/FinalSummary.jsx` | "Hidden Gems" end-of-game panel |
-| `frontend/src/styles.css` | `.feature-tag.hidden`, `.hidden-gems-panel` styles |
-
----
-
-## Limitations & Future Work
-
-- The current model is a baseline. It can be extended with matrix factorization and global collaborative filtering across users.
-- Prefix ratings can be used to train a shared model if multiple user sessions are collected.
-- The dataset currently focuses on fountain pens only; other product categories can be added.
-- Exception mode (downweighting a selection in the user preference vector) is modeled but not yet surfaced in the game UI.
-- Hidden preference thresholds are static; they could be adaptive based on the number of rounds played or the variance in the user vector.
+### Recommended next steps
+1. Add API integration tests for `/api/game/*`.
+2. Add one-command bootstrap script for backend + frontend + data load.
+3. Add automated DB health/data availability check in startup diagnostics.
+4. Continue improving movie ingest completeness and operational docs.

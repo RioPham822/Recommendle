@@ -1,177 +1,218 @@
 # Recommendle
 
-**Recommendle** is an interactive web game where players compete against an AI recommendation engine to predict fountain pen preferences. Built as a senior design project (CSC 492), it explores **sequential preference modeling** — the idea that user taste can be inferred and updated from a sequence of choices rather than traditional single-item ratings.
+Recommendle is an interactive web game where a human player competes against an AI recommendation model.  
+It is a CSC 492 Senior Design project focused on **sequential preference modeling**: learning user taste from a sequence of choices instead of one-off ratings.
 
----
-
-## How It Works
-
-1. **Onboarding** — You're shown a diverse pool of 50 fountain pens. Pick 10 that appeal to you and rate the set.
-2. **5 Rounds of Dueling** — Each round presents 10 candidate pens. You pick one; the AI simultaneously predicts which one you'll choose.
-3. **Scoring** — Each round awards 10 points to whoever "wins" (match = AI point, miss = human point). The final score tells you how predictable (or surprising) your taste is.
-4. **Leaderboard** — Completed games are ranked by score delta across all players.
-
-The AI uses a lightweight **prefix-based collaborative filtering** model that updates its understanding of your preferences after every pick, combining feature-space similarity (vendor, type, nib, price) with the sequential history of your choices.
-
-### Hidden Preference Discovery
-
-After enough rounds, the AI begins detecting **hidden preferences** — features that appear across your selections even though you likely weren't targeting them. For example, you might consistently pick pens that share a vendor or nib size without realizing it.
-
-- **Progressive hints** appear during rounds (typically round 3+) as "Hidden Patterns Emerging" tags.
-- **Full reveal at game end** — the Final Summary includes a "Hidden Gems" panel showing:
-  - The latent features the AI detected
-  - A narrative explanation of the patterns
-  - **Pens You Didn't Know You'd Love** — product recommendations scored against only the hidden feature dimensions
-
----
+## What The Program Currently Does
+- Runs a web game with:
+  - onboarding: select 10 items from a pool of 50
+  - 5 gameplay rounds with 10 candidates per round
+  - AI-vs-human scoring each round
+  - final summary with explainability and recommendations
+- Supports category-aware gameplay:
+  - `fountain_pens` (included in repo and loadable immediately)
+  - `movies` (loadable via TMDB ingestion script)
+- Uses **MongoDB** as the active backend for the app (`app.main_mongo`).
+- Provides two exploration modes in UI:
+  - visual mode
+  - feature mode
+- Tracks leaderboard and player history by category.
+- Detects hidden/latent preference patterns and surfaces "hidden gems."
 
 ## Tech Stack
+- Frontend: React 18 + Vite + CSS
+- Backend: FastAPI + Uvicorn (Python)
+- Database: MongoDB (Motor/PyMongo)
+- Model: Prefix-based collaborative filtering with sequential updates
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React 18 · Vite · Vanilla CSS |
-| **Backend** | Python · FastAPI · Uvicorn |
-| **Database** | MongoDB (via Motor async driver) |
-| **ML Model** | Prefix-based Collaborative Filtering with NMF |
-| **Data** | ~500 fountain pens scraped from Goulet Pens |
+## Repository Layout
+```text
+backend/
+  app/
+    main_mongo.py              # Active FastAPI app (MongoDB)
+    routes/game.py             # Game API endpoints
+    services/game_service.py   # Core game logic
+    ml/prefix_cf.py            # Preference model + hidden preference logic
+  data/
+    products.json              # Fountain pen catalog in repo
+  scripts/
+    load_db.py                 # Loads fountain pens into MongoDB (default)
+    ingest_movies_tmdb.py      # Ingests movies into MongoDB from TMDB
+    migrate_multicategory_schema.py
+    migrate_to_mongo.py
+frontend/
+  src/
+start.bat                      # Convenience launcher (Windows)
+```
+
+## Prerequisites
+- Python 3.10+
+- Node.js 18+ and npm
+- MongoDB running locally (default `mongodb://localhost:27017`)
 
 ---
 
-## Project Structure
+## Setup From Clone (Exact Steps)
 
-```
-├── backend/
-│   ├── app/
-│   │   ├── main_mongo.py        # FastAPI entry point
-│   │   ├── routes/game.py       # Game API endpoints
-│   │   ├── services/
-│   │   │   ├── game_service.py  # Core game logic & round generation
-│   │   │   └── recommender_mongo.py
-│   │   ├── ml/
-│   │   │   ├── prefix_cf.py     # Prefix-based CF model
-│   │   │   └── pbcf_nmf_mongo.py
-│   │   ├── models_mongo.py      # Pydantic data models
-│   │   └── schemas_game.py      # API request/response schemas
-│   ├── data/
-│   │   ├── products.json        # Full product catalog
-│   │   └── fountain_pens.csv
-│   ├── scripts/                 # Data loading & evaluation scripts
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx              # Main game state machine
-│   │   ├── components/          # UI components
-│   │   │   ├── WelcomeScreen.jsx
-│   │   │   ├── OnboardingGrid.jsx
-│   │   │   ├── SetRatingModal.jsx
-│   │   │   ├── RoundArena.jsx
-│   │   │   ├── RoundResultPanel.jsx
-│   │   │   ├── FinalSummary.jsx
-│   │   │   └── BrainModePanel.jsx
-│   │   └── lib/api.js           # API client
-│   ├── package.json
-│   └── vite.config.js
-└── docs/
-    └── design.md                # Design document
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Python 3.10+**
-- **Node.js 18+** & npm
-- **MongoDB** running locally on the default port (`27017`)
-
-### 1. Clone the repository
-
+### 1. Clone
 ```bash
 git clone https://github.com/ncstate-csc-sdc/2026Spring-Team42-Decidio-3.git
-cd Recommendle
+cd 2026Spring-Team42-Decidio-3
 ```
 
-### 2. Set up the backend
-
+### 2. Backend install
 ```bash
 cd backend
 python -m pip install -r requirements.txt
 ```
 
-Create a `.env` file (or copy the example):
+### 3. Create backend env file
+PowerShell:
+```powershell
+Copy-Item .env.example .env
+```
 
+Bash:
 ```bash
 cp .env.example .env
 ```
 
 Default values in `.env.example`:
-
-```
+```env
 MONGODB_URL=mongodb://localhost:27017
 MONGODB_DB_NAME=decidio
+MONGODB_MAX_POOL_SIZE=10
+MONGODB_MIN_POOL_SIZE=1
+TMDB_API_KEY=
 ```
 
-Load the product data into MongoDB:
-
+### 4. Load the fountain pen dataset into MongoDB (required)
+From `backend/`:
 ```bash
 python -m scripts.load_db
 ```
 
-Start the API server:
+Important:
+- `scripts.load_db` now targets **MongoDB by default**.
+- This is required for clone users; otherwise the game will have no pen data in Mongo.
 
+### 5. (Optional) Load movies into MongoDB
+If you want movie gameplay too:
+1. Set `TMDB_API_KEY` in `backend/.env`
+2. Run:
+```bash
+python -m scripts.ingest_movies_tmdb --max-movies 1000 
+```
+Note: ()
+
+Notes:
+- This can run for a long time. The deal amount is 50000 movies but it takes multiple hours to ingest
+- Progress is checkpointed at `backend/data/tmdb_ingest_checkpoint.json`.
+- If stopped, rerun the same command and it resumes from checkpoint.
+
+### 6. Start backend API
+From `backend/`:
 ```bash
 python -m uvicorn app.main_mongo:app --host localhost --port 8015 --reload
 ```
 
-### 3. Set up the frontend
-
+### 7. Start frontend
+In a new terminal:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+### 8. Open app
+- Frontend dev URL: `http://localhost:5173`
+- Backend API URL: `http://localhost:8015`
 
-### Production build (optional)
+---
 
+## Quick Start (Windows)
+After dependencies are installed and pens are loaded once, you can use:
+```bat
+start.bat
+```
+This launches backend and frontend in separate windows.
+
+---
+
+## Verify Data Is Loaded
+Check categories endpoint in browser:
+- `http://localhost:8015/api/game/categories`
+
+Expected:
+- `fountain_pens` should show a nonzero count (>= 50 needed to play).
+- `movies` may be 0 unless TMDB ingestion was run.
+
+---
+
+## Game API Endpoints
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/game/categories` | List supported categories and counts |
+| POST | `/api/game/start` | Start a game session |
+| GET | `/api/game/{game_id}/onboarding` | Get onboarding pool (50) |
+| POST | `/api/game/{game_id}/onboarding/submit` | Submit 10 picks + set rating |
+| POST | `/api/game/{game_id}/round/start` | Start next round (10 candidates) |
+| POST | `/api/game/{game_id}/round/{round_number}/pick` | Submit round pick |
+| GET | `/api/game/{game_id}/status` | Get game status/scores |
+| GET | `/api/game/{game_id}/summary` | Get final game insights |
+| GET | `/api/game/leaderboard` | Get leaderboard |
+| GET | `/api/game/player/{player_name}/history` | Get player game history |
+
+---
+
+## Data / Utility Scripts
+Run these from `backend/`:
+
+| Script | Command | Purpose |
+|---|---|---|
+| Load pen dataset into MongoDB | `python -m scripts.load_db` | Required for clone users to play pens |
+| Legacy SQLite load | `python -m scripts.load_db --target sqlite` | Old backend compatibility |
+| Ingest movies from TMDB | `python -m scripts.ingest_movies_tmdb --max-movies 50000` | Optional movie category |
+| Multi-category schema migration | `python -m scripts.migrate_multicategory_schema` | Fix old docs missing `category` |
+| SQLite -> Mongo migration | `python -m scripts.migrate_to_mongo` | Migrates legacy DB (destructive to Mongo collections) |
+| Evaluate AI on completed games | `python -m scripts.evaluate_pbcf` | Generates performance reports |
+
+Warning for `migrate_to_mongo.py`:
+- It drops and rewrites key Mongo collections. Do not run it on a DB you need to preserve without backup.
+
+---
+
+## Troubleshooting
+
+### "Pens are not loading / pens not visible"
+Cause:
+- MongoDB has no fountain pen docs.
+
+Fix:
 ```bash
-cd frontend
-npm run build
+cd backend
+python -m scripts.load_db
 ```
 
-FastAPI will automatically serve the built frontend from `frontend/dist/` at **http://localhost:8015**.
+### "Category disabled / ingest required"
+Cause:
+- Category has fewer than 50 items in Mongo.
 
----
+Fix:
+- For pens: run `python -m scripts.load_db`
+- For movies: run `python -m scripts.ingest_movies_tmdb --max-movies 50000`
 
-## API Endpoints (Game)
+### "Detected products without `category` field"
+Fix:
+```bash
+cd backend
+python -m scripts.migrate_multicategory_schema
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/game/start` | Start a new game session |
-| `GET` | `/api/game/{game_id}/onboarding` | Get the 50-pen onboarding pool |
-| `POST` | `/api/game/{game_id}/onboarding/submit` | Submit 10 selected pens + rating |
-| `POST` | `/api/game/{game_id}/round/start` | Generate the next round's candidates |
-| `POST` | `/api/game/{game_id}/round/{round}/pick` | Submit your pick for a round |
-| `GET` | `/api/game/{game_id}/status` | Get current game state & scores |
-| `GET` | `/api/game/leaderboard` | Global leaderboard |
-
----
-
-## The ML Model
-
-The recommendation engine is a **prefix-based collaborative filtering** model inspired by research on sequential preference modeling:
-
-- **Feature space**: Each pen is represented by vendor, product type, tags, nib options, and normalized price.
-- **User vector**: Built incrementally — updated after each selection with a decay factor so recent picks weigh more.
-- **Prefix ratings**: After onboarding, the user's set-level rating adjusts a per-session bias term.
-- **Candidate scoring**: Cosine similarity between the user vector and each candidate, plus the bias term.
-- **Diversity**: Onboarding pool and round candidates mix top-likelihood picks with decoy/wildcard items.
-- **Hidden preference detection**: A latency-score algorithm (`preference_weight − selection_frequency`) identifies features accumulated incidentally rather than intentionally. Products scored against only these hidden dimensions become "Hidden Gem" recommendations.
+### MongoDB connection error
+Verify MongoDB is running and `.env` has correct `MONGODB_URL`.
 
 ---
 
 ## License
-
-This project was developed as part of CSC 492 (Senior Design) coursework.
+Developed as part of CSC 492 (Senior Design coursework).
