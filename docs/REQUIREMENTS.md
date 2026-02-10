@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 This document defines the project requirements for Recommendle (Decidio Preference Modeling), based on:
-- The original sponsor problem statement in `Decidio_PreferenceModeling.pdf`
+- The original sponsor problem statement
 - The currently implemented backend, frontend, and scripts in this repository
 
 The goal is to capture what the system must do, how well it must do it, and what constraints apply.

@@ -1,23 +1,94 @@
 flowchart LR
-  subgraph Frontend
-    UI[Web UI\nImage Gallery + Feature Panel]
+  %% Client / UI
+  subgraph Client["Frontend (React + Vite)"]
+    UI["Game UI\n(Welcome, Onboarding, Rounds, Summary)"]
+    APIClient["src/lib/api.js"]
+    UI --> APIClient
   end
 
-  subgraph Backend
-    API[FastAPI]
-    ML[Prefix-CF Model]
-    DB[(SQLite)]
+  %% Backend runtime
+  subgraph Backend["Backend (FastAPI - app.main_mongo)"]
+    Main["main_mongo.py\nstartup: schema check + model refresh"]
+    GameRoutes["routes/game.py\n/api/game/*"]
+    LegacyRoutes["Legacy routes in main_mongo.py\n/api/products, /api/sessions/*"]
+    GameService["services/game_service.py\nsession flow, scoring, explanations"]
+    Recommender["services/recommender_mongo.py\nfeature space + cached item vectors"]
+    Model["ml/prefix_cf.py\nPrefixCFModel + hidden preference detection"]
+    CategoryProfiles["category_profiles.py\ncategory config + feature extraction labels"]
+    SchemaGuard["services/schema_service.py\nmulti-category compatibility checks"]
   end
 
-  subgraph Data
-    Scraper[Shopify Scraper]
-    JSON[products.json / fountain_pens.csv]
+  %% Database
+  subgraph Mongo["MongoDB (decidio)"]
+    Products[("products\nfountain_pens + movies")]
+    Games[("games")]
+    GameRounds[("game_rounds")]
+    Users[("users")]
+    Sessions[("sessions")]
+    Selections[("selections")]
+    PrefixRatings[("prefix_ratings")]
   end
 
-  UI -->|select, rate| API
-  API --> DB
-  API --> ML
-  ML --> API
-  Scraper --> JSON
-  JSON --> DB
-  API -->|recommendations| UI
+  %% Data pipelines / scripts
+  subgraph DataPipelines["Data Pipelines (backend/scripts)"]
+    LoadPens["load_db.py\n(default target: Mongo)\nloads backend/data/products.json"]
+    IngestMovies["ingest_movies_tmdb.py\nTMDB -> Mongo products"]
+    Checkpoint["backend/data/tmdb_ingest_checkpoint.json\nresume state for movie ingest"]
+    MigrateSchema["migrate_multicategory_schema.py\nbackfill category/schema_version + indexes"]
+    MigrateLegacy["migrate_to_mongo.py\nSQLite -> Mongo migration (destructive reset)"]
+    Eval["evaluate_pbcf.py\noffline metrics + reports"]
+  end
+
+  %% Optional legacy backend
+  subgraph Legacy["Legacy Compatibility (Optional)"]
+    MainSqlite["app/main.py\nSQLite backend (not default)"]
+    SqliteDB[("data/decidio.db")]
+    LoadSQLite["load_db.py --target sqlite"]
+  end
+
+  %% Runtime request flow
+  APIClient -->|HTTP /api/game/*| GameRoutes
+  APIClient -.->|HTTP legacy endpoints| LegacyRoutes
+  Main --> SchemaGuard
+  Main --> Recommender
+  Main --> GameRoutes
+  Main --> LegacyRoutes
+
+  GameRoutes --> GameService
+  GameService --> Recommender
+  GameService --> Model
+  GameService --> CategoryProfiles
+
+  %% Data access flow
+  LegacyRoutes --> Products
+  LegacyRoutes --> Users
+  LegacyRoutes --> Sessions
+  LegacyRoutes --> Selections
+  LegacyRoutes --> PrefixRatings
+
+  GameService --> Products
+  GameService --> Games
+  GameService --> GameRounds
+  GameService --> Users
+  GameService --> Sessions
+  GameService --> Selections
+  GameService --> PrefixRatings
+
+  %% Ingestion / migration flow
+  LoadPens --> Products
+  IngestMovies --> Products
+  IngestMovies --> Checkpoint
+  MigrateSchema --> Products
+  MigrateSchema --> Games
+  MigrateSchema --> GameRounds
+  MigrateLegacy --> Products
+  MigrateLegacy --> Users
+  MigrateLegacy --> Sessions
+  MigrateLegacy --> Selections
+  MigrateLegacy --> PrefixRatings
+  Eval --> Games
+  Eval --> GameRounds
+
+  %% Legacy-only path
+  LoadSQLite --> SqliteDB
+  MainSqlite --> SqliteDB
