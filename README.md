@@ -88,7 +88,7 @@ After enough rounds, the AI begins detecting **hidden preferences** — features
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/akhilbalaji11/Recommendle.git
+git clone https://github.com/ncstate-csc-sdc/2026Spring-Team42-Decidio-3.git
 cd Recommendle
 ```
 
