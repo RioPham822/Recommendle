@@ -49,6 +49,10 @@ __pycache__/
 # ── Generated reports (run evaluate_pbcf.py to regenerate) ──
 backend/reports/
 
+# ── Database files ──
+decidio.db
+
+
 # ── Logs ──
 *.log
 npm-debug.log*
