@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
+from tqdm import tqdm
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -77,7 +77,7 @@ def load_products_mongo(replace: bool = True) -> None:
         print(f"[mongo] removed {deleted} existing pen docs")
 
     upserts = 0
-    for item in data:
+    for item in tqdm(data):
         source_id = item.get("source_id")
         if not source_id:
             continue
