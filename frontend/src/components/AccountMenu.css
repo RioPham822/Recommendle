@@ -1,0 +1,247 @@
+/* Account Menu Styles */
+
+.account-menu-container {
+  position: relative;
+}
+
+.account-button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.account-button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.account-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.account-icon {
+  font-size: 1.1rem;
+}
+
+.account-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-chevron {
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+
+.account-chevron.open {
+  transform: rotate(180deg);
+}
+
+.account-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  min-width: 220px;
+  z-index: 1000;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.account-info {
+  padding: 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.account-info-name {
+  margin: 0 0 0.25rem 0;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.account-info-username {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
+.account-divider {
+  height: 1px;
+  background: var(--color-border);
+}
+
+.account-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.account-menu-item:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+}
+
+.account-menu-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.account-menu-item.logout-item {
+  color: #ef4444;
+}
+
+.account-menu-item.logout-item:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.logout-confirm {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--color-border);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.logout-confirm p {
+  margin: 0 0 0.75rem 0;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.logout-confirm-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.logout-confirm-buttons button {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.confirm-yes {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+.confirm-yes:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.confirm-no {
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+}
+
+.confirm-no:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+}
+
+.logout-confirm-buttons button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.account-menu-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+}
+
+/* Responsive Design */
+@media (max-width: 640px) {
+  .account-button {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+  }
+
+  .account-name {
+    max-width: 100px;
+  }
+
+  .account-menu {
+    min-width: 200px;
+  }
+
+  .account-info {
+    padding: 0.875rem;
+  }
+
+  .account-menu-item {
+    padding: 0.65rem 0.875rem;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .account-button {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .account-name {
+    display: none;
+  }
+
+  .account-menu {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-radius: 12px 12px 0 0;
+    min-width: unset;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  .account-info {
+    padding: 1.25rem 1rem;
+  }
+}

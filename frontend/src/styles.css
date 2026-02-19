@@ -110,6 +110,33 @@ button:hover {
   font-size: 0.72rem;
 }
 
+/* ── App Header ────────────────────────────────────────────── */
+
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem;
+  margin-bottom: 2rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.app-header.welcome-header {
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+
+.app-header .header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.app-header .app-logo {
+  height: 40px;
+}
+
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
