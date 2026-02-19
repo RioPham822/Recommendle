@@ -9,14 +9,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from bson import ObjectId
 
-from .db_mongo import get_db, close_db, Settings
+from .db_mongo import get_db, close_db, Settings, verify_connection
 from .models_mongo import Product, ProductOut, UserCreate, UserOut, SessionCreate, SessionOut
 from .models_mongo import SelectionCreate, PrefixRatingCreate, RecommendationOut
 from .category_profiles import normalize_category
 from .services.recommender_mongo import recommender_mongo
 from .services.schema_service import ensure_multicategory_compatibility
 from .routes.game import router as game_router
+from .routes.auth import router as auth_router
 from motor.motor_asyncio import AsyncIOMotorDatabase
+import logging
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -24,16 +28,16 @@ FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
 
 app = FastAPI(title="Decidio Prototype (MongoDB)")
 
+# CORS configuration: allow Render production and local development
+allowed_origins = [
+    "https://recommendle-frontend.onrender.com",  # Production
+    "http://localhost:5173",  # Local frontend (Vite dev server)
+    "http://127.0.0.1:5173",  # Local frontend alternative
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8015",
-        "http://127.0.0.1:8015",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,11 +46,17 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
-    """Initialize the recommender on startup."""
+    """Initialize the recommender on startup and verify MongoDB connection."""
+    # Verify MongoDB connection
+    is_connected = await verify_connection()
+    if not is_connected:
+        logger.warning("MongoDB connection verification failed, but proceeding with startup")
+    
     from .db_mongo import get_client
     db = get_client()[Settings().mongodb_db_name]
     await ensure_multicategory_compatibility(db)
     await recommender_mongo.refresh(db)
+    logger.info("Application startup completed")
 
 
 @app.on_event("shutdown")
@@ -309,6 +319,9 @@ async def pbcf_debug(db: AsyncIOMotorDatabase = Depends(get_db)):
 
 # Include game routes
 app.include_router(game_router)
+
+# Include auth routes
+app.include_router(auth_router)
 
 
 # Mount frontend (production React build if available).
