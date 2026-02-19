@@ -51,6 +51,7 @@ backend/reports/
 
 # ── Database files ──
 decidio.db
+*.csv
 
 
 # ── Logs ──
