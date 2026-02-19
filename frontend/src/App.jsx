@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import logo from './assets/logo.svg';
 import logoDark from './assets/logo-dark.svg';
+import AuthScreen from './components/AuthScreen';
+import AccountMenu from './components/AccountMenu';
 import BrainModePanel from './components/BrainModePanel';
 import FinalSummary from './components/FinalSummary';
 import OnboardingGrid from './components/OnboardingGrid';
@@ -17,6 +19,11 @@ import {
     startRound,
     submitOnboarding,
     submitRoundPick,
+    logoutUser,
+    getAuthToken,
+    getUserId,
+    getDisplayName,
+    clearAuthData,
 } from './lib/api';
 
 const VIEW = {
@@ -35,6 +42,20 @@ export default function App() {
     if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
+  
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return !!localStorage.getItem('sessionToken');
+  });
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [displayName, setDisplayName] = useState(() => {
+    return localStorage.getItem('displayName') || '';
+  });
+  const [username, setUsername] = useState(() => {
+    return localStorage.getItem('username') || '';
+  });
+  
   const [view, setView] = useState(VIEW.WELCOME);
   const [playerName, setPlayerName] = useState('');
   const [categories, setCategories] = useState([]);
@@ -82,6 +103,36 @@ export default function App() {
       .then(setWelcomeLeaderboard)
       .catch(() => {});
   }, [selectedCategory]);
+
+  // Handle login success
+  const handleLoginSuccess = (authData) => {
+    setIsAuthenticated(true);
+    setDisplayName(authData.displayName);
+    setUsername(authData.username);
+    setPlayerName(authData.displayName); // Use display name as player name
+    setAuthError('');
+    setAuthLoading(false);
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      const userId = getUserId();
+      const token = getAuthToken();
+      if (userId && token) {
+        await logoutUser(userId, token);
+      }
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      clearAuthData();
+      setIsAuthenticated(false);
+      setDisplayName('');
+      setUsername('');
+      setPlayerName('');
+      resetAll();
+    }
+  };
 
   const totalRounds = game?.total_rounds ?? 5;
   const humanScore = game?.human_score ?? 0;
@@ -234,107 +285,148 @@ export default function App() {
         {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
       </button>
 
-      {view !== VIEW.WELCOME && (
+      {isAuthenticated && view !== VIEW.WELCOME && (
         <header className="app-header">
+          <div className="header-content">
+            <img src={activeLogo} alt="Recommendle" className="app-logo" />
+            <AccountMenu
+              displayName={displayName}
+              username={username}
+              onLogout={handleLogout}
+              loading={authLoading}
+            />
+          </div>
+        </header>
+      )}
+
+      {!isAuthenticated && view === VIEW.WELCOME && (
+        <header className="app-header welcome-header">
           <img src={activeLogo} alt="Recommendle" className="app-logo" />
         </header>
       )}
 
-      {error && (
-        <div className="error-banner">
-          <span>{error}</span>
-          <button type="button" onClick={() => setError('')}>Dismiss</button>
-        </div>
-      )}
-
-      {view !== VIEW.WELCOME && view !== VIEW.FINAL && (
-        <BrainModePanel
-          mode={mode}
-          onModeChange={setMode}
-          categoryCopy={onboarding?.category_copy || roundData?.category_copy || roundResult?.category_copy || {}}
-        />
-      )}
-
-      {view === VIEW.WELCOME && (
-        <WelcomeScreen
+      {!isAuthenticated && view === VIEW.WELCOME && (
+        <AuthScreen
           logoSrc={activeLogo}
-          playerName={playerName}
-          setPlayerName={setPlayerName}
-          categories={categories}
-          selectedCategory={selectedCategory}
-          setSelectedCategory={setSelectedCategory}
-          onStart={handleStart}
-          loading={busy.start}
-          leaderboard={welcomeLeaderboard}
-          onViewPlayer={(name) => setViewingPlayer(name)}
+          onLoginSuccess={handleLoginSuccess}
+          loading={authLoading}
+          error={authError}
         />
       )}
 
-      {viewingPlayer && (
-        <PlayerStatsModal
-          playerName={viewingPlayer}
-          category={activeCategory}
-          onClose={() => setViewingPlayer(null)}
-        />
-      )}
-
-      {view === VIEW.ONBOARDING && onboarding && (
+      {isAuthenticated && (
         <>
-          <OnboardingGrid
-            products={onboarding.products}
-            selectedIds={selectedIds}
-            onToggle={handleToggleOnboarding}
-            onOpenRating={() => setRatingModalOpen(true)}
-            mode={mode}
-            categoryCopy={onboarding?.category_copy || {}}
-          />
-          <SetRatingModal
-            open={ratingModalOpen}
-            rating={rating}
-            setRating={setRating}
-            loading={busy.onboarding}
-            onClose={() => setRatingModalOpen(false)}
-            onSubmit={handleSubmitOnboarding}
-            categoryCopy={onboarding?.category_copy || {}}
-          />
+          {view !== VIEW.WELCOME && (
+            <header className="app-header">
+              <div className="header-content">
+                <img src={activeLogo} alt="Recommendle" className="app-logo" />
+                <AccountMenu
+                  displayName={displayName}
+                  username={username}
+                  onLogout={handleLogout}
+                  loading={authLoading}
+                />
+              </div>
+            </header>
+          )}
+
+          {error && (
+            <div className="error-banner">
+              <span>{error}</span>
+              <button type="button" onClick={() => setError('')}>Dismiss</button>
+            </div>
+          )}
+
+          {view !== VIEW.WELCOME && view !== VIEW.FINAL && (
+            <BrainModePanel
+              mode={mode}
+              onModeChange={setMode}
+              categoryCopy={onboarding?.category_copy || roundData?.category_copy || roundResult?.category_copy || {}}
+            />
+          )}
+
+          {view === VIEW.WELCOME && (
+            <WelcomeScreen
+              logoSrc={activeLogo}
+              playerName={playerName}
+              setPlayerName={setPlayerName}
+              categories={categories}
+              selectedCategory={selectedCategory}
+              setSelectedCategory={setSelectedCategory}
+              onStart={handleStart}
+              loading={busy.start}
+              leaderboard={welcomeLeaderboard}
+              onViewPlayer={(name) => setViewingPlayer(name)}
+            />
+          )}
+
+          {viewingPlayer && (
+            <PlayerStatsModal
+              playerName={viewingPlayer}
+              category={activeCategory}
+              onClose={() => setViewingPlayer(null)}
+            />
+          )}
+
+          {view === VIEW.ONBOARDING && onboarding && (
+            <>
+              <OnboardingGrid
+                products={onboarding.products}
+                selectedIds={selectedIds}
+                onToggle={handleToggleOnboarding}
+                onOpenRating={() => setRatingModalOpen(true)}
+                mode={mode}
+                categoryCopy={onboarding?.category_copy || {}}
+              />
+              <SetRatingModal
+                open={ratingModalOpen}
+                rating={rating}
+                setRating={setRating}
+                loading={busy.onboarding}
+                onClose={() => setRatingModalOpen(false)}
+                onSubmit={handleSubmitOnboarding}
+                categoryCopy={onboarding?.category_copy || {}}
+              />
+            </>
+          )}
+
+          {view === VIEW.ROUND && (
+            <RoundArena
+              round={roundData}
+              totalRounds={totalRounds}
+              humanScore={humanScore}
+              aiScore={aiScore}
+              mode={mode}
+              categoryCopy={roundData?.category_copy || {}}
+              selectedPick={selectedRoundPick}
+              onSelectPick={setSelectedRoundPick}
+              onSubmitPick={handleSubmitRoundPick}
+              submitting={busy.pick}
+            />
+          )}
+
+          {view === VIEW.RESULT && (
+            <RoundResultPanel
+              result={roundResult}
+              categoryCopy={roundResult?.category_copy || {}}
+              onNext={handleResultNext}
+              loadingNext={busy.next}
+            />
+          )}
+
+          {view === VIEW.FINAL && (
+            <FinalSummary
+              playerName={playerName}
+              humanScore={humanScore}
+              aiScore={aiScore}
+              category={activeCategory}
+              gameId={game?.id}
+              leaderboard={leaderboard}
+              onRestart={resetAll}
+              onViewPlayer={(name) => setViewingPlayer(name)}
+            />
+          )}
         </>
-      )}
-
-      {view === VIEW.ROUND && (
-        <RoundArena
-          round={roundData}
-          totalRounds={totalRounds}
-          humanScore={humanScore}
-          aiScore={aiScore}
-          mode={mode}
-          categoryCopy={roundData?.category_copy || {}}
-          selectedPick={selectedRoundPick}
-          onSelectPick={setSelectedRoundPick}
-          onSubmitPick={handleSubmitRoundPick}
-          submitting={busy.pick}
-        />
-      )}
-
-      {view === VIEW.RESULT && (
-        <RoundResultPanel
-          result={roundResult}
-          categoryCopy={roundResult?.category_copy || {}}
-          onNext={handleResultNext}
-          loadingNext={busy.next}
-        />
-      )}
-
-      {view === VIEW.FINAL && (
-        <FinalSummary
-          playerName={playerName}
-          humanScore={humanScore}
-          aiScore={aiScore}
-          category={activeCategory}
-          gameId={game?.id}
-          leaderboard={leaderboard}
-          onRestart={resetAll}
-          onViewPlayer={(name) => setViewingPlayer(name)}
-        />
       )}
     </main>
   );
