@@ -6,6 +6,9 @@ from typing import AsyncGenerator
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import logging
+
+logger = logging.getLogger(__name__)
 
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
@@ -43,16 +46,32 @@ def get_client() -> AsyncIOMotorClient:
     return _client
 
 
-def get_db() -> AsyncGenerator[AsyncIOMotorDatabase, None]:
+async def get_db() -> AsyncGenerator[AsyncIOMotorDatabase, None]:
     """Get database instance for dependency injection."""
     client = get_client()
     db = client[settings.mongodb_db_name]
-    yield db
+    try:
+        yield db
+    finally:
+        pass
 
 
-async def close_db() -> None:
+async def close_db():
     """Close the MongoDB connection."""
     global _client
     if _client is not None:
         _client.close()
         _client = None
+        logger.info("MongoDB connection closed")
+
+
+async def verify_connection():
+    """Verify MongoDB connection is working."""
+    try:
+        client = get_client()
+        await client.admin.command('ping')
+        logger.info("MongoDB connection verified successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to verify MongoDB connection: {e}")
+        return False
