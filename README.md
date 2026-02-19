@@ -19,6 +19,19 @@ It is a CSC 492 Senior Design project focused on **sequential preference modelin
 - Tracks leaderboard and player history by category.
 - Detects hidden/latent preference patterns and surfaces "hidden gems."
 
+## ✨ NEW FEATURES (Feb 2026)
+- **Excel/CSV Export**: Export database collections to Excel-compatible CSV format
+  - Interactive menu for easy selection
+  - Command-line support for scripting
+  - All data in `./data/exports/`
+- **User Authentication**: Username/password login system for multiple independent players
+  - Secure registration & login endpoints
+  - Session token management (7-day expiry)
+  - User accounts with game history tracking
+  - Password hashing with PBKDF2 (100,000 iterations)
+
+See [FEATURES_GUIDE.md](docs/FEATURES_GUIDE.md) for detailed usage.
+
 ## Tech Stack
 - Frontend: React 18 + Vite + CSS
 - Backend: FastAPI + Uvicorn (Python)
