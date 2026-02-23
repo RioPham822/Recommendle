@@ -34,6 +34,9 @@ const VIEW = {
   FINAL: 'final',
 };
 const THEME_STORAGE_KEY = 'recommendle-theme';
+const MIN_CATEGORY_ITEMS = 50;
+const CATEGORY_RETRY_MS = 2500;
+const CATEGORY_POLL_MS = 10000;
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -60,6 +63,8 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('fountain_pens');
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoryLoadError, setCategoryLoadError] = useState('');
   const [game, setGame] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -82,19 +87,64 @@ export default function App() {
 
   const activeCategory = game?.category || selectedCategory;
 
-  // Load category metadata once.
+  // Keep player name synced to authenticated display name after reload.
   useEffect(() => {
-    getCategories()
-      .then((payload) => {
-        setCategories(payload || []);
-        if (payload?.length > 0) {
-          const hasSelected = payload.some((c) => c.id === selectedCategory);
-          if (!hasSelected) {
-            setSelectedCategory(payload[0].id);
-          }
+    if (!isAuthenticated) return;
+    setPlayerName((prev) => {
+      if (prev.trim()) return prev;
+      return displayName || getDisplayName() || '';
+    });
+  }, [isAuthenticated, displayName]);
+
+  // Load category metadata and keep it fresh while datasets ingest.
+  useEffect(() => {
+    let cancelled = false;
+    let timerId;
+
+    const schedule = (delayMs) => {
+      if (cancelled) return;
+      timerId = window.setTimeout(loadCategories, delayMs);
+    };
+
+    const loadCategories = async () => {
+      if (cancelled) return;
+      try {
+        const payload = await getCategories();
+        if (cancelled) return;
+
+        const nextCategories = Array.isArray(payload) ? payload : [];
+        setCategories(nextCategories);
+        setCategoriesLoading(false);
+        setCategoryLoadError('');
+
+        if (nextCategories.length > 0) {
+          setSelectedCategory((prev) => {
+            const hasSelected = nextCategories.some((c) => c.id === prev);
+            if (hasSelected) return prev;
+            const ready = nextCategories.find((c) => (c.available_count || 0) >= MIN_CATEGORY_ITEMS);
+            return (ready || nextCategories[0]).id;
+          });
         }
-      })
-      .catch(() => {});
+
+        const hasPendingDatasets = nextCategories.some(
+          (category) => (category.available_count || 0) < MIN_CATEGORY_ITEMS
+        );
+        schedule(hasPendingDatasets ? CATEGORY_RETRY_MS : CATEGORY_POLL_MS);
+      } catch (err) {
+        if (cancelled) return;
+        setCategoriesLoading(true);
+        setCategoryLoadError(err?.message || 'Unable to load categories');
+        schedule(CATEGORY_RETRY_MS);
+      }
+    };
+
+    loadCategories();
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
   }, []);
 
   // Load leaderboard for selected category on welcome screen.
@@ -137,6 +187,17 @@ export default function App() {
   const totalRounds = game?.total_rounds ?? 5;
   const humanScore = game?.human_score ?? 0;
   const aiScore = game?.ai_score ?? 0;
+  const categoryProgress = categories.length
+    ? Math.round(
+      (categories.reduce((sum, category) => {
+        const count = Number(category.available_count) || 0;
+        return sum + Math.min(count / MIN_CATEGORY_ITEMS, 1);
+      }, 0) / categories.length) * 100
+    )
+    : 0;
+  const readyCategoryCount = categories.filter(
+    (category) => (Number(category.available_count) || 0) >= MIN_CATEGORY_ITEMS
+  ).length;
 
   useEffect(() => {
     document.body.setAttribute('data-theme', theme);
@@ -178,7 +239,7 @@ export default function App() {
   async function handleStart() {
     setError('');
     const selected = categories.find((c) => c.id === selectedCategory);
-    if (selected && selected.available_count < 50) {
+    if (selected && selected.available_count < MIN_CATEGORY_ITEMS) {
       setError(`The ${selected.display_name} catalog is not loaded yet. Run movie ingestion first.`);
       return;
     }
@@ -355,6 +416,10 @@ export default function App() {
               setSelectedCategory={setSelectedCategory}
               onStart={handleStart}
               loading={busy.start}
+              categoriesLoading={categoriesLoading}
+              categoryLoadError={categoryLoadError}
+              categoryProgress={categoryProgress}
+              readyCategoryCount={readyCategoryCount}
               leaderboard={welcomeLeaderboard}
               onViewPlayer={(name) => setViewingPlayer(name)}
             />

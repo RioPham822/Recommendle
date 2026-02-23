@@ -7,12 +7,12 @@ flowchart LR
   end
 
   %% Backend runtime
-  subgraph Backend["Backend (FastAPI - app.main_mongo)"]
-    Main["main_mongo.py\nstartup: schema check + model refresh"]
+  subgraph Backend["Backend (FastAPI - app.main)"]
+    Main["main.py\nstartup: schema check + model refresh"]
     GameRoutes["routes/game.py\n/api/game/*"]
-    LegacyRoutes["Legacy routes in main_mongo.py\n/api/products, /api/sessions/*"]
+    LegacyRoutes["Legacy routes in main.py\n/api/products, /api/sessions/*"]
     GameService["services/game_service.py\nsession flow, scoring, explanations"]
-    Recommender["services/recommender_mongo.py\nfeature space + cached item vectors"]
+    Recommender["services/recommender.py\nfeature space + cached item vectors"]
     Model["ml/prefix_cf.py\nPrefixCFModel + hidden preference detection"]
     CategoryProfiles["category_profiles.py\ncategory config + feature extraction labels"]
     SchemaGuard["services/schema_service.py\nmulti-category compatibility checks"]
@@ -35,16 +35,11 @@ flowchart LR
     IngestMovies["ingest_movies_tmdb.py\nTMDB -> Mongo products"]
     Checkpoint["backend/data/tmdb_ingest_checkpoint.json\nresume state for movie ingest"]
     MigrateSchema["migrate_multicategory_schema.py\nbackfill category/schema_version + indexes"]
-    MigrateLegacy["migrate_to_mongo.py\nSQLite -> Mongo migration (destructive reset)"]
+    %% Legacy migration removed (Mongo-only architecture)
     Eval["evaluate_pbcf.py\noffline metrics + reports"]
   end
 
-  %% Optional legacy backend
-  subgraph Legacy["Legacy Compatibility (Optional)"]
-    MainSqlite["app/main.py\nSQLite backend (not default)"]
-    SqliteDB[("data/decidio.db")]
-    LoadSQLite["load_db.py --target sqlite"]
-  end
+  %% Optional legacy backend removed
 
   %% Runtime request flow
   APIClient -->|HTTP /api/game/*| GameRoutes
@@ -81,14 +76,8 @@ flowchart LR
   MigrateSchema --> Products
   MigrateSchema --> Games
   MigrateSchema --> GameRounds
-  MigrateLegacy --> Products
-  MigrateLegacy --> Users
-  MigrateLegacy --> Sessions
-  MigrateLegacy --> Selections
-  MigrateLegacy --> PrefixRatings
+  %% legacy migration nodes removed
   Eval --> Games
   Eval --> GameRounds
 
-  %% Legacy-only path
-  LoadSQLite --> SqliteDB
-  MainSqlite --> SqliteDB
+  %% Legacy-only path removed

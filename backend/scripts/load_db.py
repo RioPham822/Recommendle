@@ -1,12 +1,12 @@
 """
-Load fountain pen data from backend/data/products.json.
+Load fountain pen data from backend/data/products.json into MongoDB.
 
-Defaults to MongoDB (the active backend used by start.bat and app.main_mongo).
+Defaults to MongoDB (the active backend used by start.bat and app.main).
 
 Usage:
     cd backend
     python -m scripts.load_db                  # load pens into MongoDB
-    python -m scripts.load_db --target sqlite  # legacy SQLite loader
+    python -m scripts.load_db --no-replace     # load without removing existing
 """
 from __future__ import annotations
 
@@ -53,9 +53,9 @@ def _normalized_pen_doc(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_products_mongo(replace: bool = True) -> None:
+def load_products(replace: bool = True) -> None:
     from pymongo import MongoClient
-    from app.db_mongo import settings
+    from app.db import settings
 
     data = _read_products()
     source_ids = [item.get("source_id") for item in data if item.get("source_id")]
@@ -100,75 +100,19 @@ def load_products_mongo(replace: bool = True) -> None:
     client.close()
 
 
-def load_products_sqlite() -> None:
-    # Legacy loader kept for compatibility with old SQLite backend.
-    from sqlalchemy.orm import Session
-    from app.db import Base, engine, SessionLocal
-    from app.models import Product, ProductImage
-
-    data = _read_products()
-
-    def _load(db: Session) -> None:
-        db.query(ProductImage).delete()
-        db.query(Product).delete()
-        db.commit()
-
-        for item in data:
-            product = Product(
-                source_id=item.get("source_id"),
-                title=item.get("title"),
-                handle=item.get("handle"),
-                vendor=item.get("vendor"),
-                product_type=item.get("product_type"),
-                price_min=item.get("price_min"),
-                price_max=item.get("price_max"),
-                currency=item.get("currency"),
-                tags_json=json.dumps(item.get("tags", [])),
-                options_json=json.dumps(item.get("options", {})),
-                description=item.get("description"),
-                url=item.get("url"),
-            )
-            db.add(product)
-            db.flush()
-            for img in item.get("images", []):
-                db.add(
-                    ProductImage(
-                        product_id=product.id,
-                        url=img.get("url"),
-                        alt=img.get("alt"),
-                        position=img.get("position"),
-                    )
-                )
-        db.commit()
-
-    Base.metadata.create_all(bind=engine)
-    with SessionLocal() as db:
-        _load(db)
-    print("[sqlite] loaded products into SQLite database")
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Load fountain pen products")
-    parser.add_argument(
-        "--target",
-        choices=["mongo", "sqlite"],
-        default="mongo",
-        help="Database target (default: mongo)",
-    )
+    parser = argparse.ArgumentParser(description="Load fountain pen products into MongoDB")
     parser.add_argument(
         "--no-replace",
         action="store_true",
-        help="Do not remove existing fountain pen docs before upsert (mongo only)",
+        help="Do not remove existing fountain pen docs before upsert",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if args.target == "mongo":
-        load_products_mongo(replace=not args.no_replace)
-    else:
-        load_products_sqlite()
+    load_products(replace=not args.no_replace)
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ Run the backend to verify the connection:
 
 ```bash
 cd backend
-python -m uvicorn app.main_mongo:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 You should see in the logs:

@@ -242,7 +242,7 @@ python test.py view-local-collection users
 
 ## Configuration
 
-Settings are in `backend/app/db_mongo.py`:
+Settings are in `backend/app/db.py`:
 
 ```python
 # Session token expiry (default: 7 days)

@@ -344,6 +344,67 @@ input:focus {
   font-size: 1rem;
 }
 
+.dataset-loading {
+  width: 100%;
+  text-align: left;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  background: var(--surface-alt);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dataset-loading-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dataset-loading-head strong {
+  color: var(--correct);
+  font-variant-numeric: tabular-nums;
+}
+
+.dataset-progress-track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.dataset-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--present), var(--correct));
+  transition: width 220ms ease;
+}
+
+.dataset-progress-fill.indeterminate {
+  width: 35%;
+  animation: indeterminate-scan 1.1s ease-in-out infinite;
+}
+
+.dataset-loading-copy {
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+}
+
+.dataset-loading-error {
+  color: #b45309;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
 /* ── Section Headers ────────────────────────────────── */
 
 .section-header {
@@ -888,6 +949,11 @@ input:focus {
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+@keyframes indeterminate-scan {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(300%); }
 }
 
 @keyframes banner-enter {

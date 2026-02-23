@@ -8,7 +8,7 @@ For clone-to-run setup, use the root `README.md`.
 ## 1. Current Capability Snapshot
 
 ### Implemented
-- Mongo-first backend (`app.main_mongo`) with category-aware gameplay.
+- Mongo-first backend (`app.main`) with category-aware gameplay.
 - Full fountain pen flow:
   - onboarding pool of 50
   - select exactly 10
@@ -23,20 +23,18 @@ For clone-to-run setup, use the root `README.md`.
 
 ### In Progress / Optional
 - Large-scale movie ingestion completion depends on valid TMDB key and runtime.
-- Legacy SQLite path remains for compatibility, but is not the default runtime path.
 
 ---
 
 ## 2. Runtime Architecture
 
 ### Active app path
-- Backend entrypoint: `backend/app/main_mongo.py`
+- Backend entrypoint: `backend/app/main.py`
 - Frontend dev server: Vite (`frontend`)
 - Database: MongoDB
 
-### Legacy compatibility path
-- SQLite backend entrypoint: `backend/app/main.py`
-- Kept for old workflows and migration support only.
+### Legacy compatibility
+- The project is Mongo-first; legacy SQLite support has been removed from main documentation.
 
 ### Request flow (active mode)
 1. React frontend calls `/api/game/*`.
@@ -120,16 +118,11 @@ Run all commands below from `backend/` unless noted.
   - Default target is MongoDB.
 
 ### Optional / advanced
-- Load pens into legacy SQLite:
-  - `python -m scripts.load_db --target sqlite`
 - Ingest movies from TMDB:
   - `python -m scripts.ingest_movies_tmdb --max-movies 50000`
   - Uses checkpoint file: `backend/data/tmdb_ingest_checkpoint.json`
 - Multi-category schema migration:
   - `python -m scripts.migrate_multicategory_schema`
-- SQLite to Mongo migration:
-  - `python -m scripts.migrate_to_mongo`
-  - Warning: this script drops/rebuilds core Mongo collections.
 - Model evaluation reports:
   - `python -m scripts.evaluate_pbcf`
 
@@ -142,7 +135,7 @@ Run all commands below from `backend/` unless noted.
 2. Copy env file from `.env.example` to `.env`.
 3. Ensure MongoDB is running.
 4. Load pens: `python -m scripts.load_db`
-5. Start backend: `python -m uvicorn app.main_mongo:app --host localhost --port 8015 --reload`
+5. Start backend: `python -m uvicorn app.main:app --host localhost --port 8015 --reload`
 6. In `frontend/`: `npm install && npm run dev`
 
 ### Reset and reload data safely
@@ -218,7 +211,6 @@ Check:
 
 ### Current limitations
 - No auth/user accounts for production identity.
-- Legacy SQLite code still exists and can confuse new contributors.
 - Recommendation quality depends on dataset size and quality.
 
 ### Recommended next steps

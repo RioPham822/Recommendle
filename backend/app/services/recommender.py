@@ -1,95 +1,169 @@
 from __future__ import annotations
+"""Reusable recommendation engine wrapper over MongoDB collections.
 
-import json
+This service owns:
+- feature-space/model refresh from `products`
+- item-vector caches used for scoring
+- integration with the PBCF component (`PBCFEngine`)
+"""
+
 import random
-from typing import Iterable
+from typing import Any
 
 import numpy as np
-
-from sqlalchemy.orm import Session
+from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..ml.prefix_cf import FeatureSpace, PrefixCFModel
 from ..ml.pbcf_nmf import PBCFEngine
-from ..models import Product, Session as UserSession, Selection, PrefixRating
+from ..models import Product
 
 
 class Recommender:
+    """Mongo-backed recommendation service used by game and legacy endpoints."""
+
     def __init__(self):
+        """Initialize in-memory model references and caches."""
         self.feature_space: FeatureSpace | None = None
         self.model: PrefixCFModel | None = None
-        self.item_vectors: dict[int, np.ndarray] = {}
+        self.item_vectors: dict[str, np.ndarray] = {}
+        self.item_norms: dict[str, float] = {}
         self.pbcf = PBCFEngine(k=6, iters=40)
         self._rating_count = 0
 
-    def refresh(self, db: Session) -> None:
-        products = db.query(Product).all()
+    async def refresh(self, db: AsyncIOMotorDatabase) -> None:
+        """Rebuild feature space, model wrapper, and per-item vector caches."""
+        products_cursor = db.products.find()
+        products = [Product(**p) for p in await products_cursor.to_list(length=None)]
+
         self.feature_space = FeatureSpace.build(products)
         self.model = PrefixCFModel(self.feature_space)
-        self.item_vectors = {product.id: self.feature_space.vectorize(product) for product in products}
-        self._refresh_pbcf(db)
+        self.item_vectors = {str(p.id): self.feature_space.vectorize(p) for p in products}
+        self.item_norms = {pid: float(np.linalg.norm(vec)) for pid, vec in self.item_vectors.items()}
+        await self._refresh_pbcf(db)
 
-    def _refresh_pbcf(self, db: Session) -> None:
-        count = db.query(PrefixRating).count()
+    async def _refresh_pbcf(self, db: AsyncIOMotorDatabase) -> None:
+        """Retrain PBCF only when prefix-rating count has changed."""
+        count = await db.prefix_ratings.count_documents({})
         if count != self._rating_count:
             self._rating_count = count
-            self.pbcf.train(db)
+            await self.pbcf.train(db)
 
-    def load_state(self, session: UserSession) -> dict:
-        if session.state_json:
-            return json.loads(session.state_json)
+    def load_state(self, game: dict[str, Any]) -> dict:
+        """Read model state from game doc or create an empty initial state."""
+        state = game.get("model_state", {})
+        if not state:
+            assert self.model is not None
+            state = self.model.init_state()
+        return state
+
+    async def save_state(self, db: AsyncIOMotorDatabase, game_id: str, state: dict) -> None:
+        """Persist updated model state into the game document."""
+        gid: str | ObjectId = game_id
+        if ObjectId.is_valid(game_id):
+            gid = ObjectId(game_id)
+        await db.games.update_one(
+            {"_id": gid},
+            {"$set": {"model_state": state}}
+        )
+
+    async def update_with_selection(
+        self,
+        db: AsyncIOMotorDatabase,
+        game_id: str,
+        game: dict[str, Any],
+        product: Product,
+        is_exception: bool
+    ) -> None:
+        """Apply a product selection update and persist resulting state."""
         assert self.model is not None
-        return self.model.init_state()
-
-    def save_state(self, session: UserSession, state: dict) -> None:
-        session.state_json = json.dumps(state)
-
-    def update_with_selection(self, session: UserSession, product: Product, is_exception: bool) -> None:
-        assert self.model is not None
-        state = self.load_state(session)
+        state = self.load_state(game)
         self.model.update_with_selection(state, product, is_exception)
-        self.save_state(session, state)
+        await self.save_state(db, game_id, state)
 
-    def update_with_prefix_rating(self, session: UserSession, rating: int) -> None:
+    async def update_with_prefix_rating(
+        self,
+        db: AsyncIOMotorDatabase,
+        game_id: str,
+        game: dict[str, Any],
+        rating: int
+    ) -> None:
+        """Apply onboarding/prefix rating update and persist resulting state."""
         assert self.model is not None
-        state = self.load_state(session)
+        state = self.load_state(game)
         self.model.update_with_prefix_rating(state, rating)
-        self.save_state(session, state)
+        await self.save_state(db, game_id, state)
 
-    def recommend(self, db: Session, session: UserSession, limit: int = 2) -> dict:
+    async def recommend(
+        self,
+        db: AsyncIOMotorDatabase,
+        game_id: str,
+        game: dict[str, Any],
+        limit: int = 2
+    ) -> dict:
+        """Generate strong picks + wildcard with coherence/prefix metrics."""
         assert self.model is not None
         if not self.item_vectors:
-            self.refresh(db)
-        self._refresh_pbcf(db)
+            await self.refresh(db)
+        await self._refresh_pbcf(db)
 
-        state = self.load_state(session)
-        selected_ids = {s.product_id for s in session.selections}
-        candidates = [p for p in db.query(Product).all() if p.id not in selected_ids]
+        state = self.load_state(game)
 
-        predicted_ratings = self.pbcf.predict_user_ratings(db, session.user_id)
-        current_prefix = "-".join(str(s.product_id) for s in session.selections)
+        # Get selected products from game (onboarding selections + completed rounds picks)
+        selected_product_ids: set[str] = set()
+        selected_product_ids.update(game.get("onboarding_selected_ids", []))
+        
+        # Get completed round picks if any
+        gid = ObjectId(game_id) if ObjectId.is_valid(game_id) else game_id
+        rounds = await db.game_rounds.find(
+            {"game_id": gid, "completed": True},
+            {"human_pick_id": 1},
+        ).to_list(length=None)
+        selected_product_ids.update({str(r.get("human_pick_id")) for r in rounds if r.get("human_pick_id")})
 
+        # Get candidate products (not already selected)
+        excluded_object_ids = [ObjectId(pid) for pid in selected_product_ids if ObjectId.is_valid(pid)]
+        products_cursor = db.products.find({"_id": {"$nin": excluded_object_ids}})
+        candidates = [Product(**p) for p in await products_cursor.to_list(length=None)]
+
+        # Get predicted ratings from PBCF
+        user_id = str(game.get("_id", ""))
+        predicted_ratings = await self.pbcf.predict_user_ratings(db, user_id)
+
+        # Build current prefix
+        current_prefix = "-".join(sorted(selected_product_ids)) if selected_product_ids else ""
+
+        # Score candidates
         scored = []
         for product in candidates:
-            vec = self.item_vectors.get(product.id)
+            vec = self.item_vectors.get(str(product.id))
             if vec is None:
                 continue
-            # Prefix-based CF score when available; otherwise fallback to content-based score.
+
+            # Use PBCF prediction if available, otherwise fall back to content-based
             prefix_key = f"{current_prefix}-{product.id}" if current_prefix else str(product.id)
             if prefix_key in predicted_ratings:
                 score = predicted_ratings[prefix_key]
             else:
                 score = self.model.score_item(state, vec)
+
             scored.append((score, product, vec))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         strong = scored[:limit]
 
+        # Select wildcard from diverse pool
         wildcard = None
         if scored:
             diverse_pool = scored[-max(10, len(scored) // 8):]
             wildcard = random.choice(diverse_pool)[1]
 
-        selected_vecs = [self.item_vectors[s.product_id] for s in session.selections if s.product_id in self.item_vectors]
+        # Calculate metrics
+        selected_vecs = [
+            self.item_vectors[sid]
+            for sid in selected_product_ids
+            if sid in self.item_vectors
+        ]
         coherence = self.model.coherence_score(selected_vecs)
         predicted_prefix = self.model.predict_prefix_rating(state)
 
@@ -100,29 +174,11 @@ class Recommender:
             "predicted_prefix_rating": predicted_prefix,
         }
 
-    def pbcf_stats(self, db: Session) -> dict:
-        self._refresh_pbcf(db)
-        artifacts = self.pbcf.artifacts
-        if artifacts is None or self.pbcf.W is None:
-            return {
-                "trained": False,
-                "prefix_count": 0,
-                "user_count": 0,
-                "ratings_count": 0,
-                "missing_ratio": 1.0,
-                "latent_dim": self.pbcf.k,
-            }
-        ratings_count = int(artifacts.mask.sum())
-        total = int(artifacts.ratings.size)
-        missing_ratio = 1.0 - (ratings_count / total) if total else 1.0
-        return {
-            "trained": True,
-            "prefix_count": len(artifacts.prefix_keys),
-            "user_count": len(artifacts.user_ids),
-            "ratings_count": ratings_count,
-            "missing_ratio": round(missing_ratio, 3),
-            "latent_dim": int(self.pbcf.W.shape[1]),
-        }
+    async def get_pbcf_stats(self, db: AsyncIOMotorDatabase) -> dict:
+        """Return lightweight PBCF training/status statistics."""
+        await self._refresh_pbcf(db)
+        return self.pbcf.get_stats()
 
 
+# Global recommender instance
 recommender = Recommender()

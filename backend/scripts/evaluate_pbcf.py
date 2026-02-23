@@ -21,14 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-
-try:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -42,7 +37,7 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_sync_db():
     """Get a synchronous pymongo connection (simpler for a standalone script)."""
-    from app.db_mongo import settings
+    from app.db import settings
     client = MongoClient(settings.mongodb_url)
     return client[settings.mongodb_db_name]
 
@@ -196,8 +191,6 @@ def analyze_learning_metrics(games: list[dict], rounds_by_game: dict, total_roun
 # ── Plotting ────────────────────────────────────────────────────────────────
 
 def plot_accuracy_by_round(by_round: dict[int, dict], path: Path):
-    if not HAS_MATPLOTLIB:
-        return
     rounds = sorted(by_round.keys())
     accuracies = [by_round[r]["accuracy"] for r in rounds]
 
@@ -217,8 +210,6 @@ def plot_accuracy_by_round(by_round: dict[int, dict], path: Path):
 
 
 def plot_score_distribution(dist: dict, path: Path):
-    if not HAS_MATPLOTLIB:
-        return
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Score comparison
@@ -245,8 +236,6 @@ def plot_score_distribution(dist: dict, path: Path):
 
 
 def plot_learning_metrics(metrics: dict, path: Path):
-    if not HAS_MATPLOTLIB:
-        return
     rounds = sorted(metrics.keys())
     coherence = [metrics[r]["avg_coherence"] for r in rounds]
     ppr = [metrics[r]["avg_predicted_prefix_rating"] for r in rounds]
@@ -385,13 +374,10 @@ def main():
     print(f"Summary saved to {summary_path}")
 
     # Generate plots
-    if HAS_MATPLOTLIB:
-        plot_accuracy_by_round(by_round, REPORTS_DIR / "ai_accuracy_by_round.png")
-        plot_score_distribution(scores, REPORTS_DIR / "score_distribution.png")
-        plot_learning_metrics(learning, REPORTS_DIR / "learning_metrics.png")
-        print(f"Plots saved to {REPORTS_DIR}/")
-    else:
-        print("matplotlib not installed — skipping plots. Install with: pip install matplotlib")
+    plot_accuracy_by_round(by_round, REPORTS_DIR / "ai_accuracy_by_round.png")
+    plot_score_distribution(scores, REPORTS_DIR / "score_distribution.png")
+    plot_learning_metrics(learning, REPORTS_DIR / "learning_metrics.png")
+    print(f"Plots saved to {REPORTS_DIR}/")
 
     # Also save raw data as JSON for programmatic use
     raw = {

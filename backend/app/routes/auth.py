@@ -5,7 +5,7 @@ Authentication routes for user registration, login, and account management.
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from ..db_mongo import get_db
+from ..db import get_db
 from ..schemas_auth import (
     UserRegister,
     UserLogin,

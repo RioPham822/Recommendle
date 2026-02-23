@@ -226,7 +226,7 @@ localStorage.removeItem('tokenExpiry');
 
 ### Q: CORS error when making auth requests
 - CORS is configured for localhost:5173 and Render
-- If using different origin, update `allowed_origins` in `main_mongo.py`
+- If using different origin, update `allowed_origins` in `main.py`
 
 ---
 
@@ -250,7 +250,7 @@ localStorage.removeItem('tokenExpiry');
 
 ## Configuration
 
-Edit `backend/app/db_mongo.py` to change:
+Edit `backend/app/db.py` to change:
 ```python
 # Session expiry time
 TOKEN_EXPIRY_DAYS = 7

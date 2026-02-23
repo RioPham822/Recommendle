@@ -15,7 +15,7 @@ from pathlib import Path
 from bson.json_util import dumps
 from pymongo import MongoClient
 
-from app.db_mongo import settings
+from app.db import settings
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]

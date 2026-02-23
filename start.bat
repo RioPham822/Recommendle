@@ -3,7 +3,7 @@ echo Starting Recommendle...
 echo.
 
 echo [1/2] Starting Backend (port 8015)...
-start "Recommendle Backend" cmd /k "cd backend && python -m uvicorn app.main_mongo:app --host localhost --port 8015 --reload"
+start "Recommendle Backend" cmd /k "cd backend && python -m uvicorn app.main:app --host localhost --port 8015 --reload"
 
 timeout /t 3 /nobreak >nul
 

@@ -12,7 +12,7 @@ It is a CSC 492 Senior Design project focused on **sequential preference modelin
 - Supports category-aware gameplay:
   - `fountain_pens` (included in repo and loadable immediately)
   - `movies` (loadable via TMDB ingestion script)
-- Uses **MongoDB** as the active backend for the app (`app.main_mongo`).
+- Uses **MongoDB** as the active backend for the app (`app.main`).
 - Provides two exploration modes in UI:
   - visual mode
   - feature mode
@@ -42,7 +42,7 @@ See [FEATURES_GUIDE.md](docs/FEATURES_GUIDE.md) for detailed usage.
 ```text
 backend/
   app/
-    main_mongo.py              # Active FastAPI app (MongoDB)
+    main.py              # Active FastAPI app (MongoDB)
     routes/game.py             # Game API endpoints
     services/game_service.py   # Core game logic
     ml/prefix_cf.py            # Preference model + hidden preference logic
@@ -52,7 +52,6 @@ backend/
     load_db.py                 # Loads fountain pens into MongoDB (default)
     ingest_movies_tmdb.py      # Ingests movies into MongoDB from TMDB
     migrate_multicategory_schema.py
-    migrate_to_mongo.py
 frontend/
   src/
 start.bat                      # Convenience launcher (Windows)
@@ -126,7 +125,7 @@ Notes:
 ### 6. Start backend API
 From `backend/`:
 ```bash
-python -m uvicorn app.main_mongo:app --host localhost --port 8015 --reload
+python -m uvicorn app.main:app --host localhost --port 8015 --reload
 ```
 
 ### 7. Start frontend
@@ -184,14 +183,12 @@ Run these from `backend/`:
 | Script | Command | Purpose |
 |---|---|---|
 | Load pen dataset into MongoDB | `python -m scripts.load_db` | Required for clone users to play pens |
-| Legacy SQLite load | `python -m scripts.load_db --target sqlite` | Old backend compatibility |
 | Ingest movies from TMDB | `python -m scripts.ingest_movies_tmdb --max-movies 50000` | Optional movie category |
 | Multi-category schema migration | `python -m scripts.migrate_multicategory_schema` | Fix old docs missing `category` |
-| SQLite -> Mongo migration | `python -m scripts.migrate_to_mongo` | Migrates legacy DB (destructive to Mongo collections) |
 | Evaluate AI on completed games | `python -m scripts.evaluate_pbcf` | Generates performance reports |
 
-Warning for `migrate_to_mongo.py`:
-- It drops and rewrites key Mongo collections. Do not run it on a DB you need to preserve without backup.
+Warning:
+- Some legacy migration scripts were previously included but are deprecated or removed. Do not run unknown migration scripts against production data.
 
 ---
 

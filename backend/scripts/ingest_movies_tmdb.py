@@ -25,7 +25,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.db_mongo import settings
+from app.db import settings
 
 
 TMDB_BASE = "https://api.themoviedb.org/3"

@@ -7,12 +7,19 @@ export default function WelcomeScreen({
   setSelectedCategory,
   onStart,
   loading,
+  categoriesLoading = false,
+  categoryLoadError = '',
+  categoryProgress = 0,
+  readyCategoryCount = 0,
   leaderboard,
   onViewPlayer,
 }) {
   const activeCategory = categories.find((c) => c.id === selectedCategory);
   const plural = activeCategory?.item_plural || 'items';
   const singular = activeCategory?.item_singular || 'item';
+  const totalCategoryCount = categories.length;
+  const showDatasetLoading = categoriesLoading || (totalCategoryCount > 0 && readyCategoryCount < totalCategoryCount);
+  const progressValue = Math.max(0, Math.min(categoryProgress, 100));
 
   return (
     <section className="screen shell welcome-screen">
@@ -56,7 +63,7 @@ export default function WelcomeScreen({
           className="category-select"
           value={selectedCategory}
           onChange={(event) => setSelectedCategory(event.target.value)}
-          disabled={loading || categories.length === 0}
+          disabled={loading || categoriesLoading || categories.length === 0}
         >
           {categories.map((category) => (
             <option key={category.id} value={category.id} disabled={category.available_count < 50}>
@@ -65,7 +72,34 @@ export default function WelcomeScreen({
           ))}
         </select>
 
-        <button type="button" onClick={onStart} disabled={loading || !playerName.trim()}>
+        {showDatasetLoading && (
+          <div className="dataset-loading" role="status" aria-live="polite">
+            <div className="dataset-loading-head">
+              <span>
+                {categoriesLoading && totalCategoryCount === 0 ? 'Loading categories...' : 'Preparing datasets...'}
+              </span>
+              {!categoriesLoading && <strong>{progressValue}%</strong>}
+            </div>
+            <div className="dataset-progress-track">
+              <div
+                className={`dataset-progress-fill${categoriesLoading && totalCategoryCount === 0 ? ' indeterminate' : ''}`}
+                style={categoriesLoading && totalCategoryCount === 0 ? undefined : { width: `${Math.max(6, progressValue)}%` }}
+              />
+            </div>
+            {!categoriesLoading && totalCategoryCount > 0 && (
+              <p className="dataset-loading-copy">
+                Ready categories: {readyCategoryCount}/{totalCategoryCount}
+              </p>
+            )}
+            {categoryLoadError && (
+              <p className="dataset-loading-error">
+                Backend is still warming up. Retrying automatically...
+              </p>
+            )}
+          </div>
+        )}
+
+        <button type="button" onClick={onStart} disabled={loading || categoriesLoading || !playerName.trim()}>
           {loading ? 'Starting...' : 'Play'}
         </button>
       </div>

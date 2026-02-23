@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from ..db_mongo import get_db
+from ..db import get_db
 from ..schemas_game import (
     CategoryOut,
     GameCreate,

@@ -12,12 +12,7 @@ from ..category_profiles import (
     extract_feature_tokens,
     is_numeric_feature_key,
 )
-
-# Try to import MongoDB models, fall back to SQLAlchemy for backward compatibility
-try:
-    from ..models_mongo import Product
-except ImportError:
-    from ..models import Product
+from ..models import Product
 
 
 @dataclass
@@ -64,7 +59,7 @@ class FeatureSpace:
         return cls(feature_index=feature_index, numeric_stats=stats)
 
     def vectorize(self, product: Any) -> np.ndarray:
-        """Vectorize a product (works with both MongoDB and SQLAlchemy models)."""
+        """Vectorize a product document from MongoDB-backed models."""
         vec = np.zeros(len(self.feature_index), dtype=np.float32)
 
         def set_feature(name: str, value: float = 1.0):
