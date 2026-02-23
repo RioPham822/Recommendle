@@ -3,11 +3,11 @@ User authentication service for multi-user support.
 Handles user registration, login, and session management.
 """
 
-from datetime import datetime, timedelta
-from typing import Optional
 import hashlib
 import logging
 import secrets
+from datetime import datetime, timedelta
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +20,14 @@ TOKEN_EXPIRY_DAYS = 7
 
 
 def hash_password(password: str) -> str:
+    """Hash a plain password with per-password salt using PBKDF2-SHA256."""
     salt = secrets.token_hex(16)
     pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 100000)
     return f"{salt}${pwd_hash.hex()}"
 
 
 def verify_password(password: str, hashed: str) -> bool:
+    """Validate a plain password against stored `salt$hash` format."""
     try:
         salt, pwd_hash = hashed.split("$")
         computed_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 100000)
@@ -36,10 +38,13 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def generate_token() -> str:
+    """Generate a URL-safe session token."""
     return secrets.token_urlsafe(32)
 
 
 class AuthService:
+    """User registration/login/session management service."""
+
     @staticmethod
     async def register_user(
         db: AsyncSession,
@@ -47,6 +52,7 @@ class AuthService:
         password: str,
         display_name: Optional[str] = None,
     ) -> dict:
+        """Create a new user account."""
         if not username or len(username) < 3:
             raise ValueError("Username must be at least 3 characters")
         if not password or len(password) < 6:
@@ -85,6 +91,7 @@ class AuthService:
         username: str,
         password: str,
     ) -> dict:
+        """Authenticate user and issue a new expiring session token."""
         username = username.strip().lower()
         user = await db.scalar(select(UserRecord).where(UserRecord.username == username))
         if not user or not verify_password(password, user.password_hash):
@@ -120,6 +127,7 @@ class AuthService:
         user_id: str,
         token: str,
     ) -> bool:
+        """Return True when a user token exists and is not expired."""
         user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
         if not user:
             return False
@@ -143,6 +151,7 @@ class AuthService:
         user_id: str,
         token: str,
     ) -> bool:
+        """Invalidate a single session token for a user."""
         user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
         if not user:
             return False
@@ -157,6 +166,7 @@ class AuthService:
         db: AsyncSession,
         user_id: str,
     ) -> Optional[dict]:
+        """Fetch public user profile fields by ID."""
         user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
         if not user:
             return None
@@ -174,6 +184,7 @@ class AuthService:
         old_password: str,
         new_password: str,
     ) -> bool:
+        """Update a user's password after verifying current credentials."""
         if not new_password or len(new_password) < 6:
             raise ValueError("New password must be at least 6 characters")
 

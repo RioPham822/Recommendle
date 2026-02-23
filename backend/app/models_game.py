@@ -1,3 +1,5 @@
+"""Legacy game-domain Pydantic models kept for compatibility/utility paths."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 def new_id() -> str:
+    """Generate compact hex identifier for model defaults."""
     return uuid4().hex
 
 
@@ -25,6 +28,7 @@ class BaseDocModel(BaseModel):
 
 class GameSession(BaseDocModel):
     """A complete game session with multiple rounds."""
+
     player_name: str
     status: str = "waiting"  # waiting, playing, completed
     current_round: int = 0
@@ -36,6 +40,7 @@ class GameSession(BaseDocModel):
 
 class GameRound(BaseDocModel):
     """A single round in the game."""
+
     game_session_id: str
     round_number: int
     mystery_user_id: str  # The user from the dataset we're predicting
@@ -51,6 +56,7 @@ class GameRound(BaseDocModel):
 
 class UserSelection(BaseDocModel):
     """Track a user's selections for training the model."""
+
     user_id: str  # Can be "dataset_user_{original_id}" for migrated users
     product_id: str
     rating: Optional[int] = None  # 1-5 if explicitly rated

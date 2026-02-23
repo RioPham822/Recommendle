@@ -1,5 +1,6 @@
+"""Core game-service composition root and shared utility methods."""
+
 from __future__ import annotations
-"""Core game-service utilities and composition root."""
 
 import hashlib
 import random
@@ -10,7 +11,12 @@ import numpy as np
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..category_profiles import category_copy, get_category_profile, normalize_category, supported_categories
+from ..category_profiles import (
+    category_copy,
+    get_category_profile,
+    normalize_category,
+    supported_categories,
+)
 from ..db import GameRecord, GameRoundRecord, ProductRecord, record_to_dict
 from ..ml.prefix_cf import PrefixCFModel
 from ..services.recommender import recommender
@@ -19,14 +25,19 @@ from .game_play import GamePlayMixin
 
 
 class GameService(GamePlayMixin, GameInsightsMixin):
+    """Primary game service combining gameplay and insights mixins."""
+
     def __init__(self):
+        """Initialize shared recommender and in-memory scoring cache."""
         self.recommender = recommender
         self._scoring_catalog_cache: dict[str, dict[str, Any]] = {}
 
     async def _ensure_indexes(self, db: AsyncSession) -> None:
+        """Compatibility shim for previous backends; indexes are managed in init_db."""
         return None
 
     async def _ensure_model(self, db: AsyncSession) -> PrefixCFModel:
+        """Ensure feature space/model are loaded before scoring operations."""
         if self.recommender.feature_space is None or self.recommender.model is None:
             await self.recommender.refresh(db)
         if self.recommender.feature_space is None or self.recommender.model is None:
@@ -72,17 +83,20 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         return changed
 
     def _feature_projection(self, category: str) -> dict[str, int]:
+        """Build field projection for model features of a category."""
         profile = get_category_profile(category)
         fields = {"category", *profile.categorical_fields, *profile.multi_fields, *profile.numeric_fields}
         return {field: 1 for field in fields}
 
     def _card_projection(self, category: str) -> dict[str, int]:
+        """Build projection for card rendering (features + title/image)."""
         projection = self._feature_projection(category)
         for field in ("title", "images"):
             projection[field] = 1
         return projection
 
     def _product_card(self, product: dict[str, Any], category: str | None = None) -> dict[str, Any]:
+        """Normalize a product into a category-aware UI card payload."""
         resolved_category = normalize_category(category or product.get("category") or "fountain_pens")
         profile = get_category_profile(resolved_category)
         image_url = None
@@ -130,6 +144,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         }
 
     async def _get_game(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
+        """Load one game row and normalize to dict shape used by services."""
         row = await db.scalar(select(GameRecord).where(GameRecord.id == game_id))
         if row is None:
             raise ValueError("Game not found")
@@ -144,6 +159,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         ids: list[str],
         projection: dict[str, int] | None = None,
     ) -> list[dict[str, Any]]:
+        """Fetch products preserving requested ID order with optional projection."""
         if not ids:
             return []
         rows = (await db.execute(select(ProductRecord).where(ProductRecord.id.in_(ids)))).scalars().all()
@@ -164,13 +180,18 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         return docs
 
     async def _completed_pick_ids(self, db: AsyncSession, game_id: str) -> list[str]:
+        """Return all completed human picks for a game in round order."""
         rows = (
-            await db.execute(
-                select(GameRoundRecord)
-                .where(and_(GameRoundRecord.game_id == game_id, GameRoundRecord.completed.is_(True)))
-                .order_by(GameRoundRecord.round_number.asc())
+            (
+                await db.execute(
+                    select(GameRoundRecord)
+                    .where(and_(GameRoundRecord.game_id == game_id, GameRoundRecord.completed.is_(True)))
+                    .order_by(GameRoundRecord.round_number.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [row.human_pick_id for row in rows if row.human_pick_id]
 
     async def _current_selection_sequence(
@@ -179,6 +200,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         game: dict[str, Any],
         include_product_id: str | None = None,
     ) -> list[str]:
+        """Return onboarding + completed picks, optionally including a pending pick."""
         picked = await self._completed_pick_ids(db, str(game["_id"]))
         sequence = list(game.get("onboarding_selected_ids", [])) + picked
         if include_product_id:
@@ -193,6 +215,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         selected_ids: list[str],
         category: str,
     ) -> dict[str, float]:
+        """Compute coherence and predicted prefix rating for selected products."""
         products = await self._get_products_by_ids(
             db,
             selected_ids,
@@ -207,7 +230,10 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         }
 
     async def _all_products_for_scoring(self, db: AsyncSession, category: str) -> list[dict[str, Any]]:
-        current_count = await db.scalar(select(func.count()).select_from(ProductRecord).where(ProductRecord.category == category))
+        """Load and cache all products for a category used in scoring/ranking."""
+        current_count = await db.scalar(
+            select(func.count()).select_from(ProductRecord).where(ProductRecord.category == category)
+        )
         cached = self._scoring_catalog_cache.get(category)
         if cached and cached.get("count") == int(current_count or 0):
             return cached["products"]
@@ -221,10 +247,12 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         return products
 
     async def _all_products_for_onboarding_sample(self, db: AsyncSession, category: str) -> list[dict[str, Any]]:
+        """Load all products for onboarding sampling (no caching)."""
         rows = (await db.execute(select(ProductRecord).where(ProductRecord.category == category))).scalars().all()
         return [record_to_dict(row) for row in rows]
 
     async def _warm_scoring_catalog(self, db: AsyncSession, category: str) -> None:
+        """Best-effort cache warmup to reduce first-round latency."""
         try:
             await self._all_products_for_scoring(db, category)
         except Exception:
@@ -236,6 +264,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         game_id: str,
         category: str,
     ) -> list[str]:
+        """Create a deterministic, diverse 50-item onboarding pool."""
         if len(all_products) <= 50:
             return [str(p["_id"]) for p in all_products]
         rng = self._rng_for(game_id, 0, "onboarding")
@@ -300,6 +329,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         state: dict[str, Any],
         products: list[dict[str, Any]],
     ) -> list[tuple[float, dict[str, Any]]]:
+        """Score and rank products against current user preference state."""
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         feature_dim = len(model.feature_space.feature_index)
         if user_vec.size < feature_dim:
@@ -338,6 +368,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         round_number: int,
         scored: list[tuple[float, dict[str, Any]]],
     ) -> list[str]:
+        """Build a balanced 10-item candidate set from ranked products."""
         rng = self._rng_for(game_id, round_number, "round_candidates")
         if len(scored) <= 10:
             ids = [str(p["_id"]) for _, p in scored]
@@ -374,11 +405,9 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         return selected_ids
 
     async def get_categories(self, db: AsyncSession) -> list[dict[str, Any]]:
+        """Return configured categories with currently available product counts."""
         rows = (
-            await db.execute(
-                select(ProductRecord.category, func.count(ProductRecord.id))
-                .group_by(ProductRecord.category)
-            )
+            await db.execute(select(ProductRecord.category, func.count(ProductRecord.id)).group_by(ProductRecord.category))
         ).all()
         counts = {str(category): int(count) for category, count in rows}
         results: list[dict[str, Any]] = []
@@ -402,6 +431,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         category: str = "fountain_pens",
         total_rounds: int = 5,
     ) -> dict[str, Any]:
+        """Create and persist a new game session for a player/category."""
         await self._ensure_indexes(db)
         model = await self._ensure_model(db)
         normalized_category = normalize_category(category)

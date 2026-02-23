@@ -1,5 +1,6 @@
+"""Gameplay round lifecycle logic for onboarding, candidate generation, and pick submission."""
+
 from __future__ import annotations
-"""Gameplay-oriented methods for onboarding, rounds, and picks."""
 
 from datetime import datetime
 from typing import Any
@@ -11,23 +12,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..category_profiles import (
     category_copy,
     get_category_profile,
-    humanize_feature as profile_humanize_feature,
-    humanize_feature_list as profile_humanize_feature_list,
+)
+from ..category_profiles import humanize_feature as profile_humanize_feature
+from ..category_profiles import humanize_feature_list as profile_humanize_feature_list
+from ..category_profiles import (
     numeric_preference_label,
 )
 from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord
 
 
 def humanize_feature(raw: str) -> str | None:
+    """Convert a raw feature token into a UI-friendly label."""
     return profile_humanize_feature(raw)
 
 
 def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Convert and deduplicate feature labels for display."""
     return profile_humanize_feature_list(raw_list)
 
 
 class GamePlayMixin:
+    """Composable gameplay operations used by the main game service."""
+
     async def get_onboarding(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
+        """Return or create the onboarding pool for a game."""
         game = await self._get_game(db, game_id)
         category = self._game_category(game)
         if game.get("status") == "completed":
@@ -66,6 +74,7 @@ class GamePlayMixin:
         selected_product_ids: list[str],
         rating: int,
     ) -> dict[str, Any]:
+        """Persist onboarding picks/rating and initialize model state for round play."""
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
@@ -124,6 +133,7 @@ class GamePlayMixin:
         }
 
     async def start_round(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
+        """Start the next round and return its candidate cards."""
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
@@ -216,6 +226,7 @@ class GamePlayMixin:
         round_number: int,
         product_id: str,
     ) -> dict[str, Any]:
+        """Score a human pick against AI predictions and finalize round state."""
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)

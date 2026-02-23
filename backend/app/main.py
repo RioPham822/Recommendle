@@ -1,23 +1,32 @@
+"""FastAPI application entrypoint for Decidio backend."""
+
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import Float, and_, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db import ProductRecord, close_db, get_db, init_db, record_to_dict, verify_connection
-from .models import Product, ProductOut, UserCreate, UserOut
 from .category_profiles import normalize_category
+from .db import (
+    ProductRecord,
+    close_db,
+    get_db,
+    init_db,
+    record_to_dict,
+    verify_connection,
+)
+from .models import Product, ProductOut, UserCreate, UserOut
+from .routes.auth import router as auth_router
+from .routes.game import router as game_router
 from .services.recommender import recommender
 from .services.schema_service import ensure_multicategory_compatibility
-from .routes.game import router as game_router
-from .routes.auth import router as auth_router
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿"""HTTP routes for game lifecycle, rounds, leaderboard, and summaries."""
+
+from __future__ import annotations
 
 from typing import List
 
@@ -30,6 +32,7 @@ router = APIRouter(prefix="/api/game", tags=["game"])
 async def get_categories(
     db: AsyncSession = Depends(get_db),
 ):
+    """List supported categories and available inventory counts."""
     return await game_service.get_categories(db)
 
 
@@ -39,6 +42,7 @@ async def get_leaderboard(
     category: str = "fountain_pens",
     db: AsyncSession = Depends(get_db),
 ):
+    """Return top completed games for a category."""
     try:
         return await game_service.get_leaderboard(db, limit=limit, category=category)
     except ValueError as exc:
@@ -52,6 +56,7 @@ async def get_player_history(
     category: str = "fountain_pens",
     db: AsyncSession = Depends(get_db),
 ):
+    """Return completed game history for one player/category."""
     try:
         return await game_service.get_player_history(db, player_name, limit=limit, category=category)
     except ValueError as exc:
@@ -63,6 +68,7 @@ async def start_game(
     payload: GameCreate,
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a new game session."""
     try:
         game = await game_service.create_game(
             db,
@@ -80,6 +86,7 @@ async def get_onboarding(
     game_id: str,
     db: AsyncSession = Depends(get_db),
 ):
+    """Return onboarding pool for a game."""
     try:
         result = await game_service.get_onboarding(db, game_id)
         return OnboardingOut(**result)
@@ -93,6 +100,7 @@ async def submit_onboarding(
     payload: OnboardingSubmit,
     db: AsyncSession = Depends(get_db),
 ):
+    """Submit onboarding picks and 1..5 preference rating."""
     try:
         result = await game_service.submit_onboarding(
             db,
@@ -110,6 +118,7 @@ async def start_round(
     game_id: str,
     db: AsyncSession = Depends(get_db),
 ):
+    """Start and return the next round candidate set."""
     try:
         result = await game_service.start_round(db, game_id)
         return RoundStartOut(**result)
@@ -124,6 +133,7 @@ async def submit_round_pick(
     payload: RoundPickSubmit,
     db: AsyncSession = Depends(get_db),
 ):
+    """Submit one round pick and return AI-vs-human result payload."""
     try:
         result = await game_service.submit_pick(
             db,
@@ -141,6 +151,7 @@ async def get_game_status(
     game_id: str,
     db: AsyncSession = Depends(get_db),
 ):
+    """Return current status for a game session."""
     try:
         status = await game_service.get_game_status(db, game_id)
         return GameStatusOut(**status)
@@ -153,6 +164,7 @@ async def get_game_summary(
     game_id: str,
     db: AsyncSession = Depends(get_db),
 ):
+    """Return final summary for a completed game session."""
     try:
         result = await game_service.get_game_summary(db, game_id)
         return GameSummaryOut(**result)

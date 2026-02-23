@@ -1,3 +1,5 @@
+"""Startup schema checks for category-aware data assumptions."""
+
 from __future__ import annotations
 
 from sqlalchemy import func, select

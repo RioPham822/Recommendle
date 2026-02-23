@@ -1,5 +1,6 @@
+"""Recommendation engine facade for model refresh, state updates, and inference."""
+
 from __future__ import annotations
-"""Reusable recommendation engine wrapper over SQL-backed collections."""
 
 import random
 from typing import Any
@@ -8,14 +9,23 @@ import numpy as np
 from sqlalchemy import and_, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, record_to_dict
+from ..db import (
+    GameRecord,
+    GameRoundRecord,
+    PrefixRatingRecord,
+    ProductRecord,
+    record_to_dict,
+)
 from ..ml.pbcf_nmf import PBCFEngine
 from ..ml.prefix_cf import FeatureSpace, PrefixCFModel
 from ..models import Product
 
 
 class Recommender:
+    """Coordinates feature/model state and PBCF signals over persisted game data."""
+
     def __init__(self):
+        """Initialize model handles and in-memory vector caches."""
         self.feature_space: FeatureSpace | None = None
         self.model: PrefixCFModel | None = None
         self.item_vectors: dict[str, np.ndarray] = {}
@@ -24,6 +34,7 @@ class Recommender:
         self._rating_count = 0
 
     async def refresh(self, db: AsyncSession) -> None:
+        """Rebuild feature space/model and cached item vectors from current products."""
         rows = (await db.execute(select(ProductRecord))).scalars().all()
         products = [Product(**record_to_dict(row)) for row in rows]
         self.feature_space = FeatureSpace.build(products)
@@ -33,12 +44,14 @@ class Recommender:
         await self._refresh_pbcf(db)
 
     async def _refresh_pbcf(self, db: AsyncSession) -> None:
+        """Retrain PBCF only when rating count has changed."""
         count = await db.scalar(select(func.count()).select_from(PrefixRatingRecord))
         if count != self._rating_count:
             self._rating_count = int(count or 0)
             await self.pbcf.train(db)
 
     def load_state(self, game: dict[str, Any]) -> dict:
+        """Load game model state or initialize default state."""
         state = game.get("model_state", {})
         if not state:
             assert self.model is not None
@@ -46,6 +59,7 @@ class Recommender:
         return state
 
     async def save_state(self, db: AsyncSession, game_id: str, state: dict) -> None:
+        """Persist model state for a game record."""
         game = await db.scalar(select(GameRecord).where(GameRecord.id == game_id))
         if game:
             game.model_state = state
@@ -59,6 +73,7 @@ class Recommender:
         product: Product,
         is_exception: bool,
     ) -> None:
+        """Apply a product-selection update to a game's model state."""
         assert self.model is not None
         state = self.load_state(game)
         self.model.update_with_selection(state, product, is_exception)
@@ -71,6 +86,7 @@ class Recommender:
         game: dict[str, Any],
         rating: int,
     ) -> None:
+        """Apply onboarding prefix-rating feedback to a game's model state."""
         assert self.model is not None
         state = self.load_state(game)
         self.model.update_with_prefix_rating(state, rating)
@@ -83,6 +99,7 @@ class Recommender:
         game: dict[str, Any],
         limit: int = 2,
     ) -> dict:
+        """Return strong and wildcard recommendations plus diagnostic metrics."""
         assert self.model is not None
         if not self.item_vectors:
             await self.refresh(db)
@@ -92,12 +109,16 @@ class Recommender:
         selected_product_ids: set[str] = set(game.get("onboarding_selected_ids", []))
 
         rounds = (
-            await db.execute(
-                select(GameRoundRecord).where(
-                    and_(GameRoundRecord.game_id == game_id, GameRoundRecord.completed.is_(True))
+            (
+                await db.execute(
+                    select(GameRoundRecord).where(
+                        and_(GameRoundRecord.game_id == game_id, GameRoundRecord.completed.is_(True))
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         selected_product_ids.update({str(r.human_pick_id) for r in rounds if r.human_pick_id})
 
         if selected_product_ids:
@@ -135,6 +156,7 @@ class Recommender:
         }
 
     async def get_pbcf_stats(self, db: AsyncSession) -> dict:
+        """Return current PBCF training/statistics snapshot."""
         await self._refresh_pbcf(db)
         return self.pbcf.get_stats()
 

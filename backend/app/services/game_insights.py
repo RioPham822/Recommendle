@@ -1,5 +1,6 @@
+"""Post-game analytics helpers: summary, status, leaderboard, and player history."""
+
 from __future__ import annotations
-"""Post-game analytics and leaderboard/history methods."""
 
 from datetime import datetime
 from typing import Any
@@ -11,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..category_profiles import (
     category_copy,
     get_category_profile,
-    humanize_feature_list as profile_humanize_feature_list,
+)
+from ..category_profiles import humanize_feature_list as profile_humanize_feature_list
+from ..category_profiles import (
     normalize_category,
     numeric_preference_label,
 )
@@ -19,11 +22,15 @@ from ..db import GameRecord, GameRoundRecord
 
 
 def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Convert raw feature tokens into user-facing labels."""
     return profile_humanize_feature_list(raw_list)
 
 
 class GameInsightsMixin:
+    """Composable read/query operations for completed and in-progress games."""
+
     async def get_game_summary(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
+        """Return final game analytics, recommendations, and hidden-preference insights."""
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
@@ -32,12 +39,16 @@ class GameInsightsMixin:
             raise ValueError("Game is not yet completed")
 
         rounds = (
-            await db.execute(
-                select(GameRoundRecord)
-                .where(and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.completed.is_(True)))
-                .order_by(GameRoundRecord.round_number.asc())
+            (
+                await db.execute(
+                    select(GameRoundRecord)
+                    .where(and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.completed.is_(True)))
+                    .order_by(GameRoundRecord.round_number.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         round_stats = []
         cumulative_ai = 0
@@ -158,6 +169,7 @@ class GameInsightsMixin:
         }
 
     async def get_game_status(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
+        """Return current game progress and scoreboard state."""
         game = await self._get_game(db, game_id)
         category = self._game_category(game)
         active_round = await db.scalar(
@@ -187,15 +199,24 @@ class GameInsightsMixin:
         limit: int = 10,
         category: str = "fountain_pens",
     ) -> list[dict[str, Any]]:
+        """Return top completed games for a category sorted by performance."""
         normalized_category = normalize_category(category)
         games = (
-            await db.execute(
-                select(GameRecord)
-                .where(and_(GameRecord.status == "completed", GameRecord.category == normalized_category))
-                .order_by(desc(GameRecord.human_score - GameRecord.ai_score), desc(GameRecord.human_score), GameRecord.created_at.asc())
-                .limit(int(limit))
+            (
+                await db.execute(
+                    select(GameRecord)
+                    .where(and_(GameRecord.status == "completed", GameRecord.category == normalized_category))
+                    .order_by(
+                        desc(GameRecord.human_score - GameRecord.ai_score),
+                        desc(GameRecord.human_score),
+                        GameRecord.created_at.asc(),
+                    )
+                    .limit(int(limit))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "rank": index + 1,
@@ -217,21 +238,26 @@ class GameInsightsMixin:
         limit: int = 20,
         category: str = "fountain_pens",
     ) -> list[dict[str, Any]]:
+        """Return completed game history for one player in a category."""
         normalized_category = normalize_category(category)
         games = (
-            await db.execute(
-                select(GameRecord)
-                .where(
-                    and_(
-                        GameRecord.player_name == player_name,
-                        GameRecord.status == "completed",
-                        GameRecord.category == normalized_category,
+            (
+                await db.execute(
+                    select(GameRecord)
+                    .where(
+                        and_(
+                            GameRecord.player_name == player_name,
+                            GameRecord.status == "completed",
+                            GameRecord.category == normalized_category,
+                        )
                     )
+                    .order_by(GameRecord.created_at.desc())
+                    .limit(limit)
                 )
-                .order_by(GameRecord.created_at.desc())
-                .limit(limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         results: list[dict[str, Any]] = []
         for game in games:

@@ -8,10 +8,8 @@ from __future__ import annotations
 
 
 def main() -> None:
-    print(
-        "No action required: category compatibility checks now run at API startup "
-        "against the Postgres-backed store."
-    )
+    """Print no-op notice for deprecated legacy migration path."""
+    print("No action required: category compatibility checks now run at API startup " "against the Postgres-backed store.")
 
 
 if __name__ == "__main__":

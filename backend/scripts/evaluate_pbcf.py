@@ -17,6 +17,7 @@ from sqlalchemy import and_, func, select
 
 
 async def evaluate(category: str | None = None) -> None:
+    """Compute and print aggregate AI/game evaluation metrics from DB data."""
     from app.db import GameRecord, GameRoundRecord, get_db, init_db
 
     await init_db()
@@ -35,12 +36,16 @@ async def evaluate(category: str | None = None) -> None:
 
     game_ids = [g.id for g in games]
     rounds = (
-        await db.execute(
-            select(GameRoundRecord).where(
-                and_(GameRoundRecord.game_id.in_(game_ids), GameRoundRecord.completed.is_(True))
+        (
+            await db.execute(
+                select(GameRoundRecord).where(
+                    and_(GameRoundRecord.game_id.in_(game_ids), GameRoundRecord.completed.is_(True))
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     total_rounds = len(rounds)
     ai_correct = sum(1 for r in rounds if r.ai_correct)
@@ -79,12 +84,14 @@ async def evaluate(category: str | None = None) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options for evaluation script."""
     parser = argparse.ArgumentParser(description="Evaluate AI performance from Postgres game data")
     parser.add_argument("--category", default=None, help="Optional category filter")
     return parser.parse_args()
 
 
 def main() -> None:
+    """CLI entrypoint for evaluation script."""
     args = parse_args()
     asyncio.run(evaluate(category=args.category))
 

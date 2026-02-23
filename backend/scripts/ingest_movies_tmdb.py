@@ -31,6 +31,7 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
 
 def _load_checkpoint() -> dict[str, Any]:
+    """Load ingest checkpoint from disk, returning empty state on failure."""
     if not CHECKPOINT_PATH.exists():
         return {}
     try:
@@ -40,11 +41,13 @@ def _load_checkpoint() -> dict[str, Any]:
 
 
 def _save_checkpoint(data: dict[str, Any]) -> None:
+    """Persist ingest checkpoint to disk."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CHECKPOINT_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _runtime_bucket(minutes: int | None) -> str | None:
+    """Bucket runtime minutes into short/medium/long labels."""
     if minutes is None:
         return None
     if minutes < 90:
@@ -55,12 +58,14 @@ def _runtime_bucket(minutes: int | None) -> str | None:
 
 
 def _decade_bucket(year: int | None) -> str | None:
+    """Convert year to decade label (for example, 1990s)."""
     if year is None:
         return None
     return f"{(year // 10) * 10}s"
 
 
 def _build_movie_doc(movie: dict[str, Any]) -> dict[str, Any]:
+    """Transform TMDB movie payload into canonical Postgres product document."""
     release_date = str(movie.get("release_date") or "")
     release_year = int(release_date[:4]) if len(release_date) >= 4 and release_date[:4].isdigit() else None
     runtime = movie.get("runtime")
@@ -70,9 +75,7 @@ def _build_movie_doc(movie: dict[str, Any]) -> dict[str, Any]:
     keywords = [k.get("name") for k in ((movie.get("keywords") or {}).get("keywords") or []) if k.get("name")]
     companies = [c.get("name") for c in (movie.get("production_companies") or []) if c.get("name")]
     directors = [
-        c.get("name")
-        for c in (movie.get("credits") or {}).get("crew") or []
-        if c.get("job") == "Director" and c.get("name")
+        c.get("name") for c in (movie.get("credits") or {}).get("crew") or [] if c.get("job") == "Director" and c.get("name")
     ]
 
     primary_country = None
@@ -81,7 +84,7 @@ def _build_movie_doc(movie: dict[str, Any]) -> dict[str, Any]:
         primary_country = countries[0].get("iso_3166_1")
 
     certification = None
-    for country_row in ((movie.get("release_dates") or {}).get("results") or []):
+    for country_row in (movie.get("release_dates") or {}).get("results") or []:
         if country_row.get("iso_3166_1") == "US":
             for rel in country_row.get("release_dates") or []:
                 cert = rel.get("certification")
@@ -132,6 +135,7 @@ def _build_movie_doc(movie: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tmdb_get(api_key: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Perform one TMDB API GET request and return parsed JSON body."""
     query = {"api_key": api_key}
     if params:
         query.update(params)
@@ -147,6 +151,7 @@ async def ingest_movies(
     end_year: int,
     resume: bool,
 ) -> None:
+    """Ingest movies from TMDB into Postgres with resume checkpoint support."""
     from app.db import ProductRecord, get_db, init_db, settings
 
     api_key = (settings.tmdb_api_key or "").strip()
@@ -254,6 +259,7 @@ async def ingest_movies(
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options for TMDB ingestion."""
     parser = argparse.ArgumentParser(description="Ingest TMDB movies into Postgres")
     parser.add_argument("--max-movies", type=int, default=1000, help="Maximum number of movies to ingest")
     parser.add_argument("--start-year", type=int, default=1950, help="Earliest release year to scan")
@@ -263,6 +269,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """CLI entrypoint for TMDB ingestion."""
     args = parse_args()
     asyncio.run(
         ingest_movies(

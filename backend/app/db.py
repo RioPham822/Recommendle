@@ -1,3 +1,5 @@
+"""Database settings, ORM models, and async session lifecycle for Postgres."""
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +11,12 @@ from uuid import uuid4
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import text
 
@@ -19,6 +26,8 @@ ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
 
 class Settings(BaseSettings):
+    """Application settings loaded from `backend/.env`."""
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_PATH),
         env_file_encoding="utf-8",
@@ -35,18 +44,24 @@ settings = Settings()
 
 
 class Base(DeclarativeBase):
+    """Base SQLAlchemy declarative model."""
+
     pass
 
 
 def utcnow() -> datetime:
+    """Return naive UTC datetime suitable for DB timestamp columns."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def new_id() -> str:
+    """Generate compact hex identifier for application records."""
     return uuid4().hex
 
 
 class ProductRecord(Base):
+    """Stored product document (category + JSONB payload)."""
+
     __tablename__ = "products"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -56,6 +71,8 @@ class ProductRecord(Base):
 
 
 class UserRecord(Base):
+    """Stored user account and active session tokens."""
+
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -69,6 +86,8 @@ class UserRecord(Base):
 
 
 class GameRecord(Base):
+    """Stored game session state and score progression."""
+
     __tablename__ = "games"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -89,6 +108,8 @@ class GameRecord(Base):
 
 
 class GameRoundRecord(Base):
+    """Stored per-round data and AI/human outcomes for a game."""
+
     __tablename__ = "game_rounds"
     __table_args__ = (UniqueConstraint("game_id", "round_number", name="uq_game_round"),)
 
@@ -115,6 +136,8 @@ class GameRoundRecord(Base):
 
 
 class PrefixRatingRecord(Base):
+    """Stored onboarding prefix ratings used by PBCF training."""
+
     __tablename__ = "prefix_ratings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -125,6 +148,7 @@ class PrefixRatingRecord(Base):
 
 
 def record_to_dict(record: Any) -> dict[str, Any]:
+    """Normalize ORM row into existing dict shape expected by services."""
     if isinstance(record, ProductRecord):
         payload = dict(record.data or {})
         payload["_id"] = str(record.id)
@@ -149,6 +173,7 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
+    """Return singleton async SQLAlchemy engine."""
     global _engine
     if _engine is None:
         _engine = create_async_engine(
@@ -160,6 +185,7 @@ def get_engine() -> AsyncEngine:
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return singleton async session factory."""
     global _session_factory
     if _session_factory is None:
         _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
@@ -167,26 +193,37 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def init_db() -> None:
+    """Create schema objects and ensure required indexes/columns exist."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_category_status_created ON games(category, status, created_at DESC)"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_category_player_created ON games(category, player_name, created_at DESC)"))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_games_category_status_created ON games(category, status, created_at DESC)")
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_games_category_player_created ON games(category, player_name, created_at DESC)"
+            )
+        )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_category ON products(category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_source_id ON products((data->>'source_id'))"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_title ON products((data->>'title'))"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_vendor ON products((data->>'vendor'))"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rounds_game_created ON game_rounds(game_id, created_at DESC)"))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_rounds_game_created ON game_rounds(game_id, created_at DESC)")
+        )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield one async DB session per request/task."""
     session_factory = get_session_factory()
     async with session_factory() as session:
         yield session
 
 
 async def close_db() -> None:
+    """Dispose engine/session factory and release DB resources."""
     global _engine, _session_factory
     if _engine is not None:
         await _engine.dispose()
@@ -196,6 +233,7 @@ async def close_db() -> None:
 
 
 async def verify_connection() -> bool:
+    """Check DB connectivity with a lightweight query."""
     try:
         engine = get_engine()
         async with engine.connect() as conn:

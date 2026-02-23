@@ -1,11 +1,16 @@
+"""Pydantic request/response schemas for game APIs."""
+
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class ProductCard(BaseModel):
+    """Compact product representation used in gameplay responses."""
+
     id: str
     category: str = "fountain_pens"
     title: str
@@ -20,16 +25,22 @@ class ProductCard(BaseModel):
 
 
 class MetricsOut(BaseModel):
+    """Coherence and prefix-rating diagnostics returned by API."""
+
     coherence_score: float
     predicted_prefix_rating: float
 
 
 class GameCreate(BaseModel):
+    """Payload for creating a new game session."""
+
     player_name: str = Field(..., min_length=1, max_length=80)
     category: str = Field(default="fountain_pens")
 
 
 class GameOut(BaseModel):
+    """API response after game creation."""
+
     id: str
     player_name: str
     category: str = "fountain_pens"
@@ -41,6 +52,8 @@ class GameOut(BaseModel):
 
 
 class OnboardingOut(BaseModel):
+    """Onboarding pool response."""
+
     game_id: str
     category: str = "fountain_pens"
     pool_size: int
@@ -49,11 +62,15 @@ class OnboardingOut(BaseModel):
 
 
 class OnboardingSubmit(BaseModel):
+    """Onboarding submission payload."""
+
     selected_product_ids: list[str]
     rating: int = Field(..., ge=1, le=5)
 
 
 class OnboardingSubmitOut(BaseModel):
+    """Result after onboarding picks are accepted."""
+
     accepted: bool
     coherence_score: float
     predicted_prefix_rating: float
@@ -61,6 +78,8 @@ class OnboardingSubmitOut(BaseModel):
 
 
 class RoundStartOut(BaseModel):
+    """Response payload for starting a round."""
+
     round_number: int
     category: str = "fountain_pens"
     category_copy: dict[str, str] = Field(default_factory=dict)
@@ -69,14 +88,20 @@ class RoundStartOut(BaseModel):
 
 
 class RoundPickSubmit(BaseModel):
+    """Payload for submitting one pick in a round."""
+
     product_id: str
 
 
 class ScoredProductCard(ProductCard):
+    """Product card augmented with model score."""
+
     score: float
 
 
 class AIExplanation(BaseModel):
+    """Structured explanation block for round outcomes."""
+
     reason: str
     top_candidates: list[ScoredProductCard]
     learned_preferences: list[list] = Field(default_factory=list)
@@ -87,6 +112,8 @@ class AIExplanation(BaseModel):
 
 
 class RoundResultOut(BaseModel):
+    """Full response for a completed round."""
+
     round_number: int
     category: str = "fountain_pens"
     category_copy: dict[str, str] = Field(default_factory=dict)
@@ -106,6 +133,8 @@ class RoundResultOut(BaseModel):
 
 
 class RoundStatOut(BaseModel):
+    """Per-round stats used in summary responses."""
+
     round_number: int
     ai_correct: bool
     ai_rank_of_pick: int | None = None
@@ -117,6 +146,8 @@ class RoundStatOut(BaseModel):
 
 
 class AccuracySummary(BaseModel):
+    """Aggregate accuracy metrics for a completed game."""
+
     top3_correct: int
     exact_correct: int
     top3_rate: float
@@ -124,6 +155,8 @@ class AccuracySummary(BaseModel):
 
 
 class GameSummaryOut(BaseModel):
+    """Final summary payload for a completed game."""
+
     game_id: str
     player_name: str
     category: str = "fountain_pens"
@@ -142,6 +175,8 @@ class GameSummaryOut(BaseModel):
 
 
 class GameStatusOut(BaseModel):
+    """Current game status payload."""
+
     id: str
     player_name: str
     category: str = "fountain_pens"
@@ -157,6 +192,8 @@ class GameStatusOut(BaseModel):
 
 
 class LeaderboardEntry(BaseModel):
+    """Single leaderboard row."""
+
     rank: int
     player_name: str
     category: str = "fountain_pens"
@@ -168,6 +205,8 @@ class LeaderboardEntry(BaseModel):
 
 
 class PlayerGameEntry(BaseModel):
+    """Single historical game row for a player."""
+
     game_id: str
     player_name: str
     category: str = "fountain_pens"
@@ -180,6 +219,8 @@ class PlayerGameEntry(BaseModel):
 
 
 class CategoryOut(BaseModel):
+    """Available category metadata and inventory count."""
+
     id: str
     display_name: str
     item_singular: str

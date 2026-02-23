@@ -7,12 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas_auth import (
-    UserRegister,
-    UserLogin,
     AuthTokenOut,
-    UserOut,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    UserLogin,
+    UserOut,
+    UserRegister,
 )
 from ..services.auth import auth_service
 
@@ -32,16 +32,16 @@ async def register(
             password=payload.password,
             display_name=payload.display_name,
         )
-        
+
         # Auto-login after registration
         auth_result = await auth_service.login_user(
             db,
             username=payload.username,
             password=payload.password,
         )
-        
+
         return AuthTokenOut(**auth_result)
-    
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -59,7 +59,7 @@ async def login(
             password=payload.password,
         )
         return AuthTokenOut(**auth_result)
-    
+
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e)) from e
 
@@ -71,10 +71,10 @@ async def get_user(
 ):
     """Get user information by user ID."""
     user = await auth_service.get_user(db, user_id)
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return UserOut(
         id=user.get("_id"),
         username=user.get("username"),
@@ -97,15 +97,15 @@ async def change_password(
             old_password=payload.old_password,
             new_password=payload.new_password,
         )
-        
+
         if not success:
             raise HTTPException(status_code=400, detail="Failed to change password")
-        
+
         return ChangePasswordResponse(
             success=True,
             message="Password changed successfully",
         )
-    
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -118,8 +118,8 @@ async def logout(
 ):
     """Logout user by invalidating session token."""
     success = await auth_service.logout_user(db, user_id, session_token)
-    
+
     if not success:
         raise HTTPException(status_code=400, detail="Failed to logout")
-    
+
     return {"message": "Logged out successfully"}

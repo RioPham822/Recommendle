@@ -8,6 +8,7 @@ Usage:
     python -m scripts.load_db                  # load pens
     python -m scripts.load_db --no-replace     # load without removing existing
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,8 +18,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from tqdm import tqdm
+
 from sqlalchemy import and_, delete, func, select
+from tqdm import tqdm
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -29,12 +31,14 @@ PRODUCTS_JSON = DATA_DIR / "products.json"
 
 
 def _read_products() -> list[dict[str, Any]]:
+    """Read scraped pen products from local JSON dataset."""
     if not PRODUCTS_JSON.exists():
         raise SystemExit("products.json not found. Run scrape_gouletpens.py first.")
     return json.loads(PRODUCTS_JSON.read_text(encoding="utf-8"))
 
 
 def _normalized_pen_doc(item: dict[str, Any]) -> dict[str, Any]:
+    """Map raw scraped product to canonical Postgres document shape."""
     return {
         "schema_version": 2,
         "source_id": item.get("source_id"),
@@ -54,6 +58,7 @@ def _normalized_pen_doc(item: dict[str, Any]) -> dict[str, Any]:
 
 
 async def load_products(replace: bool = True) -> None:
+    """Load or upsert fountain-pen products into Postgres."""
     from app.db import ProductRecord, get_db, init_db
 
     data = _read_products()
@@ -67,8 +72,7 @@ async def load_products(replace: bool = True) -> None:
     if replace:
         deleted_result = await db.execute(
             delete(ProductRecord).where(
-                (ProductRecord.category == "fountain_pens")
-                | (ProductRecord.data["source_id"].as_string().in_(source_ids))
+                (ProductRecord.category == "fountain_pens") | (ProductRecord.data["source_id"].as_string().in_(source_ids))
             )
         )
         await db.commit()
@@ -103,7 +107,9 @@ async def load_products(replace: bool = True) -> None:
 
     await db.commit()
 
-    total_pens = await db.scalar(select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "fountain_pens"))
+    total_pens = await db.scalar(
+        select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "fountain_pens")
+    )
     total_movies = await db.scalar(select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "movies"))
     print(f"[postgres] upserted {upserts} fountain pen docs")
     print(f"[postgres] totals -> pens: {int(total_pens or 0)}, movies: {int(total_movies or 0)}")
@@ -111,6 +117,7 @@ async def load_products(replace: bool = True) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options for pen dataset loading."""
     parser = argparse.ArgumentParser(description="Load fountain pen products into Postgres store")
     parser.add_argument(
         "--no-replace",
@@ -121,6 +128,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """CLI entrypoint for loading pen dataset."""
     args = parse_args()
     asyncio.run(load_products(replace=not args.no_replace))
 

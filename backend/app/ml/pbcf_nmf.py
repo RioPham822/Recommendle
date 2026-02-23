@@ -1,3 +1,5 @@
+"""PBCF matrix-factorization engine used for prefix-rating personalization."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +15,8 @@ from ..db import GameRoundRecord
 
 @dataclass
 class PBCFArtifacts:
+    """Training matrix artifacts and lookup indices."""
+
     prefix_keys: list[str]
     user_ids: list[str]
     ratings: np.ndarray
@@ -20,7 +24,10 @@ class PBCFArtifacts:
 
 
 class PBCFEngine:
+    """Non-negative matrix factorization engine over prefix-user ratings."""
+
     def __init__(self, k: int = 6, iters: int = 50, seed: int = 42):
+        """Initialize factorization hyperparameters and RNG."""
         self.k = k
         self.iters = iters
         self.rng = np.random.default_rng(seed)
@@ -29,6 +36,7 @@ class PBCFEngine:
         self.H: np.ndarray | None = None
 
     async def _build_prefix_from_game_round(self, game_round: dict[str, Any]) -> str | None:
+        """Build stable prefix key from stored clue product IDs."""
         clue_ids = game_round.get("clue_pen_ids")
         if not clue_ids or not isinstance(clue_ids, list):
             return None
@@ -36,11 +44,18 @@ class PBCFEngine:
         return "-".join(sorted_clues)
 
     async def build_matrix(self, db: AsyncSession) -> PBCFArtifacts | None:
+        """Build sparse rating matrix from completed historical rounds."""
         rounds = (
-            await db.execute(
-                select(GameRoundRecord).where(GameRoundRecord.completed.is_(True)).order_by(GameRoundRecord.created_at.asc())
+            (
+                await db.execute(
+                    select(GameRoundRecord)
+                    .where(GameRoundRecord.completed.is_(True))
+                    .order_by(GameRoundRecord.created_at.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not rounds:
             return None
 
@@ -88,6 +103,7 @@ class PBCFEngine:
         return PBCFArtifacts(prefix_keys=prefix_keys, user_ids=user_ids, ratings=R, mask=mask)
 
     async def train(self, db: AsyncSession) -> None:
+        """Fit latent factors on current matrix artifacts."""
         artifacts = await self.build_matrix(db)
         if artifacts is None:
             self.artifacts = None
@@ -111,6 +127,7 @@ class PBCFEngine:
         self.H = H
 
     async def predict_user_ratings(self, db: AsyncSession, user_id: str) -> dict[str, float]:
+        """Predict per-prefix ratings for a known user ID."""
         if self.artifacts is None or self.W is None:
             await self.train(db)
         if self.artifacts is None or self.W is None:
@@ -131,6 +148,7 @@ class PBCFEngine:
         return {key: float(r_pred[i]) for i, key in enumerate(artifacts.prefix_keys)}
 
     def get_stats(self) -> dict[str, Any]:
+        """Return lightweight diagnostics for model readiness/training size."""
         if self.artifacts is None or self.W is None:
             return {
                 "trained": False,

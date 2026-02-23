@@ -11,9 +11,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from app.db import (
+    GameRecord,
+    GameRoundRecord,
+    PrefixRatingRecord,
+    ProductRecord,
+    UserRecord,
+    get_db,
+    init_db,
+)
 from sqlalchemy import func, select
-
-from app.db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, UserRecord, get_db, init_db
 
 
 async def list_collections() -> None:
