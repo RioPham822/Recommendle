@@ -59,13 +59,12 @@ start.bat                      # Convenience launcher (Windows)
 ```
 
 ## Prerequisites
-- Python 3.10+
-- Node.js 18+ and npm
-- Docker and Docker Compose
+- Docker Desktop (Windows/macOS) or Docker Engine + Docker Compose plugin (Linux)
+- Git
 
 ---
 
-## Setup From Clone (Exact Steps)
+## Setup From Clone (Docker First)
 
 ### 1. Clone
 ```bash
@@ -73,87 +72,60 @@ git clone https://github.com/ncstate-csc-sdc/2026Spring-Team42-Decidio-3.git
 cd 2026Spring-Team42-Decidio-3
 ```
 
-### 2. Backend install
-```bash
-cd backend
-python -m pip install -r requirements.txt
-```
-
-### 3. Create backend env file
-PowerShell:
-```powershell
-Copy-Item .env.example .env
-```
-
-Bash:
-```bash
-cp .env.example .env
-```
-
-Default values in `.env.example`:
-```env
-DATABASE_URL=postgresql+asyncpg://decidio:decidio_pass@localhost:5432/decidio
-DB_POOL_SIZE=10
-DB_MAX_OVERFLOW=20
-TMDB_API_KEY=
-```
-
-### 4. Start Postgres with Docker (required)
+### 2. Start full stack (Postgres + backend + frontend)
 From repo root:
 ```bash
-docker compose up -d postgres
+docker compose up --build -d
 ```
 
-### 5. Load the fountain pen dataset (required)
-From `backend/`:
+### 3. Load the fountain pen dataset (required once per new database)
+From repo root:
 ```bash
-python -m scripts.load_db
+docker compose exec backend python -m scripts.load_db
 ```
 
 Important:
-- `scripts.load_db` targets the Postgres-backed store used by the backend.
-- This is required for clone users; otherwise the game will have no seed data.
+- This seeds the required `fountain_pens` category into Postgres.
+- Without this, gameplay cannot start because there are not enough items.
 
-### 6. (Optional) Load movies
-If you want movie gameplay too:
+### 4. (Optional) Load movies from TMDB
+If you want the `movies` category:
 1. Set `TMDB_API_KEY` in `backend/.env`
-2. Run:
+2. Recreate backend with the updated env:
 ```bash
-python -m scripts.ingest_movies_tmdb --max-movies 1000 
+docker compose up -d --build backend
 ```
-Note: ()
+3. Run ingestion:
+```bash
+docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 1000
+```
 
 Notes:
-- This can run for a long time. The deal amount is 50000 movies but it takes multiple hours to ingest
+- Large ingests can take hours (for example, `--max-movies 50000`).
 - Progress is checkpointed at `backend/data/tmdb_ingest_checkpoint.json`.
-- If stopped, rerun the same command and it resumes from checkpoint.
+- If interrupted, rerun the same command to resume.
 
-### 7. Start backend API
-From `backend/`:
-```bash
-python -m uvicorn app.main:app --host localhost --port 8015 --reload
-```
-
-### 8. Start frontend
-In a new terminal:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### 9. Open app
+### 5. Open app
 - Frontend dev URL: `http://localhost:5173`
 - Backend API URL: `http://localhost:8015`
 
+### 6. Stop services
+```bash
+docker compose down
+```
+
+To also remove Postgres data volume:
+```bash
+docker compose down -v
+```
+
 ---
 
-## Quick Start (Windows)
-After dependencies are installed and pens are loaded once, you can use:
-```bat
-start.bat
+## Quick Start (Any OS)
+```bash
+docker compose up --build -d
+docker compose exec backend python -m scripts.load_db
 ```
-This launches backend and frontend in separate windows.
 
 ---
 
@@ -184,17 +156,29 @@ Expected:
 ---
 
 ## Data / Utility Scripts
-Run these from `backend/`:
+Run these from repo root:
 
 | Script | Command | Purpose |
 |---|---|---|
-| Load pen dataset into Postgres-backed store | `python -m scripts.load_db` | Required for clone users to play |
-| Ingest movies from TMDB | `python -m scripts.ingest_movies_tmdb --max-movies 1000` | Optional movie category ingest |
-| Category migration | `python -m scripts.migrate_multicategory_schema` | No-op placeholder in Postgres mode |
-| Evaluate AI on completed games | `python -m scripts.evaluate_pbcf` | Prints accuracy/score metrics from completed games |
+| Load pen dataset into Postgres-backed store | `docker compose exec backend python -m scripts.load_db` | Required for clone users to play |
+| Ingest movies from TMDB | `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 1000` | Optional movie category ingest |
+| Category migration | `docker compose exec backend python -m scripts.migrate_multicategory_schema` | No-op placeholder in Postgres mode |
+| Evaluate AI on completed games | `docker compose exec backend python -m scripts.evaluate_pbcf` | Prints accuracy/score metrics from completed games |
 
 Warning:
 - Some legacy migration scripts were previously included but are deprecated or removed. Do not run unknown migration scripts against production data.
+
+## When To Run Data Scripts
+- Run `docker compose exec backend python -m scripts.load_db`:
+  - right after first `docker compose up --build -d` on a new machine
+  - any time you reset volumes with `docker compose down -v`
+  - any time `fountain_pens` count drops below 50
+- Run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies ...`:
+  - only if you want the `movies` category enabled
+  - again later if you want to ingest more movies
+- Run `docker compose exec backend python -m scripts.migrate_multicategory_schema`:
+  - only when importing old data that may miss the `category` field
+  - usually not needed for fresh Docker-first setups
 
 ---
 
@@ -206,8 +190,7 @@ Cause:
 
 Fix:
 ```bash
-cd backend
-python -m scripts.load_db
+docker compose exec backend python -m scripts.load_db
 ```
 
 ### "Category disabled / ingest required"
@@ -215,18 +198,20 @@ Cause:
 - Category has fewer than 50 items in the database.
 
 Fix:
-- For pens: run `python -m scripts.load_db`
-- For movies: run `python -m scripts.ingest_movies_tmdb --max-movies 50000`
+- For pens: run `docker compose exec backend python -m scripts.load_db`
+- For movies: run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 50000`
 
 ### "Detected products without `category` field"
 Fix:
 ```bash
-cd backend
-python -m scripts.migrate_multicategory_schema
+docker compose exec backend python -m scripts.migrate_multicategory_schema
 ```
 
 ### Postgres connection error
-Verify Docker Postgres is running (`docker compose up -d postgres`) and `.env` has a valid `DATABASE_URL`.
+Verify services are up with `docker compose ps`, then restart stack:
+```bash
+docker compose up -d --build
+```
 
 ---
 
