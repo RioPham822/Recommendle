@@ -1,4 +1,4 @@
-# Development Guide
+﻿# Development Guide
 
 Technical reference for contributors working on Recommendle.
 For clone-to-run setup, use the root `README.md`.
@@ -8,7 +8,7 @@ For clone-to-run setup, use the root `README.md`.
 ## 1. Current Capability Snapshot
 
 ### Implemented
-- Mongo-first backend (`app.main`) with category-aware gameplay.
+- Postgres-first backend (`app.main`) with category-aware gameplay.
 - Full fountain pen flow:
   - onboarding pool of 50
   - select exactly 10
@@ -31,21 +31,21 @@ For clone-to-run setup, use the root `README.md`.
 ### Active app path
 - Backend entrypoint: `backend/app/main.py`
 - Frontend dev server: Vite (`frontend`)
-- Database: MongoDB
+- Database: Postgres
 
 ### Legacy compatibility
-- The project is Mongo-first; legacy SQLite support has been removed from main documentation.
+- The project is Postgres-first; legacy SQLite support has been removed from main documentation.
 
 ### Request flow (active mode)
 1. React frontend calls `/api/game/*`.
 2. FastAPI game routes in `backend/app/routes/game.py`.
 3. Game logic in `backend/app/services/game_service.py`.
 4. Model and feature-space logic in `backend/app/ml/prefix_cf.py`.
-5. Data read/write through Mongo collections.
+5. Data read/write through Postgres collections.
 
 ---
 
-## 3. Data Model (MongoDB)
+## 3. Data Model (Postgres)
 
 Primary collections:
 - `products`
@@ -113,9 +113,9 @@ Hidden preference pipeline:
 Run all commands below from `backend/` unless noted.
 
 ### Required for normal clone setup
-- Load pens into Mongo:
+- Load pens into Postgres:
   - `python -m scripts.load_db`
-  - Default target is MongoDB.
+  - Default target is Postgres.
 
 ### Optional / advanced
 - Ingest movies from TMDB:
@@ -133,13 +133,13 @@ Run all commands below from `backend/` unless noted.
 ### First run (fresh clone)
 1. Install backend deps: `python -m pip install -r requirements.txt`
 2. Copy env file from `.env.example` to `.env`.
-3. Ensure MongoDB is running.
+3. Ensure Postgres is running.
 4. Load pens: `python -m scripts.load_db`
 5. Start backend: `python -m uvicorn app.main:app --host localhost --port 8015 --reload`
 6. In `frontend/`: `npm install && npm run dev`
 
 ### Reset and reload data safely
-1. Drop relevant Mongo collections if needed.
+1. Drop relevant Postgres collections if needed.
 2. Reload pens: `python -m scripts.load_db`
 3. Optionally ingest movies again.
 
@@ -184,9 +184,9 @@ Note:
 
 ### Pens not visible after clone
 Cause:
-- Mongo has no fountain pen docs yet.
+- Postgres has no fountain pen docs yet.
 Fix:
-- Run `python -m scripts.load_db` (Mongo default).
+- Run `python -m scripts.load_db` (Postgres default).
 
 ### Movie category disabled / ingest required
 Cause:
@@ -200,10 +200,10 @@ Cause:
 Fix:
 - Run `python -m scripts.migrate_multicategory_schema`.
 
-### Mongo connection failure
+### Postgres connection failure
 Check:
-- Mongo service is running.
-- `MONGODB_URL` / `MONGODB_DB_NAME` in `backend/.env`.
+- Postgres service is running.
+- `Postgres_URL` / `Postgres_DB_NAME` in `backend/.env`.
 
 ---
 
@@ -218,3 +218,4 @@ Check:
 2. Add one-command bootstrap script for backend + frontend + data load.
 3. Add automated DB health/data availability check in startup diagnostics.
 4. Continue improving movie ingest completeness and operational docs.
+

@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: decidio-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: decidio
+      POSTGRES_PASSWORD: decidio_pass
+      POSTGRES_DB: decidio
+    ports:
+      - "5432:5432"
+    volumes:
+      - decidio_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U decidio -d decidio"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: decidio-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://decidio:decidio_pass@postgres:5432/decidio
+      DB_POOL_SIZE: 10
+      DB_MAX_OVERFLOW: 20
+    ports:
+      - "8015:8015"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: decidio-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8015
+    ports:
+      - "5173:5173"
+
+volumes:
+  decidio_pgdata:

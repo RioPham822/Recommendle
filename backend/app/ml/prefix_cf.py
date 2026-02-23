@@ -59,7 +59,7 @@ class FeatureSpace:
         return cls(feature_index=feature_index, numeric_stats=stats)
 
     def vectorize(self, product: Any) -> np.ndarray:
-        """Vectorize a product document from MongoDB-backed models."""
+        """Vectorize a product document from persisted models."""
         vec = np.zeros(len(self.feature_index), dtype=np.float32)
 
         def set_feature(name: str, value: float = 1.0):

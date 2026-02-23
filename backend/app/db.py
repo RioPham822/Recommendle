@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import AsyncGenerator
-
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, AsyncGenerator
+from uuid import uuid4
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.sql import text
 
 logger = logging.getLogger(__name__)
 
@@ -20,58 +25,183 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # MongoDB Settings
-    mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_db_name: str = "decidio"
-    mongodb_max_pool_size: int = 10
-    mongodb_min_pool_size: int = 1
+    database_url: str = "postgresql+asyncpg://decidio:decidio_pass@localhost:5432/decidio"
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
     tmdb_api_key: str = ""
 
 
 settings = Settings()
 
-# Global motor client
-_client: AsyncIOMotorClient | None = None
+
+class Base(DeclarativeBase):
+    pass
 
 
-def get_client() -> AsyncIOMotorClient:
-    """Get or create the MongoDB client."""
-    global _client
-    if _client is None:
-        _client = AsyncIOMotorClient(
-            settings.mongodb_url,
-            maxPoolSize=settings.mongodb_max_pool_size,
-            minPoolSize=settings.mongodb_min_pool_size,
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def new_id() -> str:
+    return uuid4().hex
+
+
+class ProductRecord(Base):
+    __tablename__ = "products"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    category: Mapped[str] = mapped_column(String(100), default="fountain_pens", index=True)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class UserRecord(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(300), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    games: Mapped[list[str]] = mapped_column(JSON, default=list)
+    session_tokens: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class GameRecord(Base):
+    __tablename__ = "games"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    schema_version: Mapped[int] = mapped_column(Integer, default=2)
+    player_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(100), default="fountain_pens", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="onboarding", index=True)
+    current_round: Mapped[int] = mapped_column(Integer, default=0)
+    total_rounds: Mapped[int] = mapped_column(Integer, default=5)
+    human_score: Mapped[int] = mapped_column(Integer, default=0)
+    ai_score: Mapped[int] = mapped_column(Integer, default=0)
+    model_state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    onboarding_pool_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    onboarding_selected_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    onboarding_rating: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class GameRoundRecord(Base):
+    __tablename__ = "game_rounds"
+    __table_args__ = (UniqueConstraint("game_id", "round_number", name="uq_game_round"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=2)
+    category: Mapped[str] = mapped_column(String(100), default="fountain_pens", index=True)
+    game_id: Mapped[str] = mapped_column(String(32), index=True)
+    round_number: Mapped[int] = mapped_column(Integer, index=True)
+    candidate_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    pre_metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    human_pick_id: Mapped[str | None] = mapped_column(String(32))
+    ai_pick_id: Mapped[str | None] = mapped_column(String(32))
+    ai_confidence: Mapped[float | None] = mapped_column(Float)
+    ai_top_k: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    ai_top3_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    ai_rank_of_pick: Mapped[int | None] = mapped_column(Integer)
+    ai_correct: Mapped[bool | None] = mapped_column(Boolean)
+    human_points: Mapped[int] = mapped_column(Integer, default=0)
+    ai_points: Mapped[int] = mapped_column(Integer, default=0)
+    post_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class PrefixRatingRecord(Base):
+    __tablename__ = "prefix_ratings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), index=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+def record_to_dict(record: Any) -> dict[str, Any]:
+    if isinstance(record, ProductRecord):
+        payload = dict(record.data or {})
+        payload["_id"] = str(record.id)
+        payload["category"] = record.category
+        if "created_at" not in payload:
+            payload["created_at"] = record.created_at
+        return payload
+
+    data: dict[str, Any] = {}
+    for column in record.__table__.columns:
+        key = column.name
+        value = getattr(record, key)
+        if key == "id":
+            data["_id"] = str(value)
+        else:
+            data[key] = value
+    return data
+
+
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+def get_engine() -> AsyncEngine:
+    global _engine
+    if _engine is None:
+        _engine = create_async_engine(
+            settings.database_url,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
         )
-    return _client
+    return _engine
 
 
-async def get_db() -> AsyncGenerator[AsyncIOMotorDatabase, None]:
-    """Get database instance for dependency injection."""
-    client = get_client()
-    db = client[settings.mongodb_db_name]
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    global _session_factory
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
+    return _session_factory
+
+
+async def init_db() -> None:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_category_status_created ON games(category, status, created_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_category_player_created ON games(category, player_name, created_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_category ON products(category)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_source_id ON products((data->>'source_id'))"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_title ON products((data->>'title'))"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_vendor ON products((data->>'vendor'))"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rounds_game_created ON game_rounds(game_id, created_at DESC)"))
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        yield session
+
+
+async def close_db() -> None:
+    global _engine, _session_factory
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        _session_factory = None
+        logger.info("Postgres connection closed")
+
+
+async def verify_connection() -> bool:
     try:
-        yield db
-    finally:
-        pass
-
-
-async def close_db():
-    """Close the MongoDB connection."""
-    global _client
-    if _client is not None:
-        _client.close()
-        _client = None
-        logger.info("MongoDB connection closed")
-
-
-async def verify_connection():
-    """Verify MongoDB connection is working."""
-    try:
-        client = get_client()
-        await client.admin.command('ping')
-        logger.info("MongoDB connection verified successfully")
+        engine = get_engine()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("Postgres connection verified successfully")
         return True
-    except Exception as e:
-        logger.error(f"Failed to verify MongoDB connection: {e}")
+    except Exception as exc:
+        logger.error(f"Failed to verify Postgres connection: {exc}")
         return False

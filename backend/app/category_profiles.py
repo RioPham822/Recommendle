@@ -116,7 +116,13 @@ def category_copy(category: str | None) -> dict[str, str]:
 def _value_for_field(product: Any, field: str) -> Any:
     if isinstance(product, dict):
         return product.get(field)
-    return getattr(product, field, None)
+    direct = getattr(product, field, None)
+    if direct is not None:
+        return direct
+    payload = getattr(product, "data", None)
+    if isinstance(payload, dict):
+        return payload.get(field)
+    return None
 
 
 def _to_slug(value: Any) -> str:

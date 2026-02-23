@@ -1,13 +1,12 @@
 from __future__ import annotations
 """Gameplay-oriented methods for onboarding, rounds, and picks."""
 
-import asyncio
 from datetime import datetime
 from typing import Any
 
 import numpy as np
-from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
     category_copy,
@@ -16,6 +15,7 @@ from ..category_profiles import (
     humanize_feature_list as profile_humanize_feature_list,
     numeric_preference_label,
 )
+from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord
 
 
 def humanize_feature(raw: str) -> str | None:
@@ -27,10 +27,7 @@ def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, 
 
 
 class GamePlayMixin:
-    """Gameplay flow methods extracted from `game_service.py` for readability."""
-
-    async def get_onboarding(self, db: AsyncIOMotorDatabase, game_id: str) -> dict[str, Any]:
-        """Return (and lazily initialize) the onboarding product pool for a game."""
+    async def get_onboarding(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
         game = await self._get_game(db, game_id)
         category = self._game_category(game)
         if game.get("status") == "completed":
@@ -40,30 +37,18 @@ class GamePlayMixin:
         if not pool_ids:
             all_products = await self._all_products_for_onboarding_sample(db, category)
             pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
-            await db.games.update_one(
-                {"_id": game["_id"]},
-                {"$set": {"onboarding_pool_ids": pool_ids, "updated_at": datetime.utcnow()}},
-            )
+            game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+            if game_row:
+                game_row.onboarding_pool_ids = pool_ids
+                game_row.updated_at = datetime.utcnow()
+                await db.commit()
 
-        # Warm the full scoring catalog in the background while users pick onboarding items.
-        asyncio.create_task(self._warm_scoring_catalog(db, category))
+        await self._warm_scoring_catalog(db, category)
 
         products = await self._get_products_by_ids(
             db,
             pool_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "directors": 1,
-            },
+            projection=self._card_projection(category),
         )
 
         return {
@@ -76,19 +61,17 @@ class GamePlayMixin:
 
     async def submit_onboarding(
         self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         game_id: str,
         selected_product_ids: list[str],
         rating: int,
     ) -> dict[str, Any]:
-        """Persist onboarding picks/rating and transition the game to round-ready state."""
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
 
         if game.get("onboarding_selected_ids"):
             raise ValueError("Onboarding already submitted for this game")
-
         if len(selected_product_ids) != 10:
             raise ValueError("You must select exactly 10 products")
         if len(set(selected_product_ids)) != 10:
@@ -103,30 +86,7 @@ class GamePlayMixin:
         selected_products = await self._get_products_by_ids(
             db,
             selected_product_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "product_type": 1,
-                "options": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
+            projection={**self._feature_projection(category), "title": 1, "images": 1},
         )
         if len(selected_products) != 10:
             raise ValueError("One or more selected products were not found")
@@ -136,32 +96,25 @@ class GamePlayMixin:
         for product in selected_products:
             model.update_with_selection(state, product, is_exception=False)
         model.update_with_prefix_rating(state, rating)
+        metrics = await self._metrics_for_state(db, model, state, selected_product_ids, category)
 
-        metrics = await self._metrics_for_state(db, model, state, selected_product_ids)
-
-        base_time = datetime.utcnow()
-        # Store prefix rating for PBCF training (game_id as session_id for compatibility)
-        prefix_rating_doc = {
-            "session_id": str(game["_id"]),
-            "rating": int(rating),
-            "tags": [],
-            "created_at": base_time,
-        }
-        await db.prefix_ratings.insert_one(prefix_rating_doc)
-
-        await db.games.update_one(
-            {"_id": game["_id"]},
-            {
-                "$set": {
-                    "status": "ready",
-                    "category": category,
-                    "model_state": state,
-                    "onboarding_selected_ids": selected_product_ids,
-                    "onboarding_rating": int(rating),
-                    "updated_at": datetime.utcnow(),
-                }
-            },
+        db.add(
+            PrefixRatingRecord(
+                session_id=str(game["_id"]),
+                rating=int(rating),
+                tags=[],
+                created_at=datetime.utcnow(),
+            )
         )
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.status = "ready"
+            game_row.category = category
+            game_row.model_state = state
+            game_row.onboarding_selected_ids = selected_product_ids
+            game_row.onboarding_rating = int(rating)
+            game_row.updated_at = datetime.utcnow()
+        await db.commit()
 
         return {
             "accepted": True,
@@ -170,8 +123,7 @@ class GamePlayMixin:
             "next_round": 1,
         }
 
-    async def start_round(self, db: AsyncIOMotorDatabase, game_id: str) -> dict[str, Any]:
-        """Create (or return existing) candidate set for the next round."""
+    async def start_round(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
@@ -182,45 +134,35 @@ class GamePlayMixin:
             raise ValueError("Game is complete")
 
         round_number = game["current_round"] + 1
-        existing = await db.game_rounds.find_one(
-            {"game_id": game["_id"], "round_number": round_number}
+        existing = await db.scalar(
+            select(GameRoundRecord).where(
+                and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.round_number == round_number)
+            )
         )
-
-        if existing and not existing.get("completed", False):
+        if existing and not existing.completed:
             products = await self._get_products_by_ids(
                 db,
-                existing.get("candidate_ids", []),
-                projection={
-                    "title": 1,
-                    "category": 1,
-                    "vendor": 1,
-                    "price_min": 1,
-                    "price_max": 1,
-                    "tags": 1,
-                    "images": 1,
-                    "release_year": 1,
-                    "runtime_minutes": 1,
-                    "vote_average": 1,
-                    "directors": 1,
-                },
+                existing.candidate_ids or [],
+                projection=self._card_projection(category),
             )
             return {
                 "round_number": round_number,
                 "category": category,
                 "category_copy": category_copy(category),
                 "candidates": [self._product_card(p, category) for p in products],
-                "pre_round_metrics": existing.get("pre_metrics", {"coherence_score": 0.0, "predicted_prefix_rating": 3.0}),
+                "pre_round_metrics": existing.pre_metrics or {"coherence_score": 0.0, "predicted_prefix_rating": 3.0},
             }
 
         state = game.get("model_state") or model.init_state()
         if self._align_state_to_feature_space(model, state):
-            await db.games.update_one(
-                {"_id": game["_id"]},
-                {"$set": {"model_state": state, "updated_at": datetime.utcnow()}},
-            )
+            game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+            if game_row:
+                game_row.model_state = state
+                game_row.updated_at = datetime.utcnow()
+                await db.commit()
+
         selected_ids = await self._current_selection_sequence(db, game)
         used = set(selected_ids)
-
         all_products = await self._all_products_for_scoring(db, category)
         candidates_source = [p for p in all_products if str(p["_id"]) not in used]
         if len(candidates_source) < 10:
@@ -231,43 +173,33 @@ class GamePlayMixin:
         candidate_products = await self._get_products_by_ids(
             db,
             candidate_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "directors": 1,
-            },
+            projection=self._card_projection(category),
         )
+        pre_metrics = await self._metrics_for_state(db, model, state, selected_ids, category)
 
-        pre_metrics = await self._metrics_for_state(db, model, state, selected_ids)
+        if existing is None:
+            db.add(
+                GameRoundRecord(
+                    schema_version=2,
+                    category=category,
+                    game_id=str(game["_id"]),
+                    round_number=round_number,
+                    candidate_ids=candidate_ids,
+                    pre_metrics=pre_metrics,
+                    completed=False,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        else:
+            existing.candidate_ids = candidate_ids
+            existing.pre_metrics = pre_metrics
+            existing.completed = False
 
-        round_doc = {
-            "schema_version": 2,
-            "category": category,
-            "game_id": game["_id"],
-            "round_number": round_number,
-            "candidate_ids": candidate_ids,
-            "pre_metrics": pre_metrics,
-            "completed": False,
-            "created_at": datetime.utcnow(),
-        }
-        await db.game_rounds.update_one(
-            {"game_id": game["_id"], "round_number": round_number},
-            {"$setOnInsert": round_doc},
-            upsert=True,
-        )
-
-        await db.games.update_one(
-            {"_id": game["_id"]},
-            {"$set": {"status": "playing", "updated_at": datetime.utcnow()}},
-        )
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.status = "playing"
+            game_row.updated_at = datetime.utcnow()
+        await db.commit()
 
         return {
             "round_number": round_number,
@@ -279,12 +211,11 @@ class GamePlayMixin:
 
     async def submit_pick(
         self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         game_id: str,
         round_number: int,
         product_id: str,
     ) -> dict[str, Any]:
-        """Evaluate the user's round pick, score AI vs human, and update game state."""
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
@@ -294,48 +225,25 @@ class GamePlayMixin:
             raise ValueError("Game is already complete")
         if round_number != game["current_round"] + 1:
             raise ValueError("Invalid round number for current game state")
-        if not ObjectId.is_valid(product_id):
-            raise ValueError("Invalid product ID")
 
-        round_doc = await db.game_rounds.find_one(
-            {"game_id": game["_id"], "round_number": round_number}
+        round_row = await db.scalar(
+            select(GameRoundRecord).where(
+                and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.round_number == round_number)
+            )
         )
-        if round_doc is None:
+        if round_row is None:
             raise ValueError("Round has not been started")
-        if round_doc.get("completed", False):
+        if round_row.completed:
             raise ValueError("Round has already been completed")
 
-        candidate_ids = round_doc.get("candidate_ids", [])
+        candidate_ids = round_row.candidate_ids or []
         if product_id not in candidate_ids:
             raise ValueError("Selected product is not in this round's candidate set")
 
         candidate_products = await self._get_products_by_ids(
             db,
             candidate_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "product_type": 1,
-                "options": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
+            projection={**self._feature_projection(category), "title": 1, "images": 1},
         )
         by_id = {str(p["_id"]): p for p in candidate_products}
         if product_id not in by_id:
@@ -356,7 +264,6 @@ class GamePlayMixin:
                 vec = self.recommender.feature_space.vectorize(item)
                 item_vectors[pid] = vec
                 item_norms[pid] = float(np.linalg.norm(vec))
-
             if user_norm <= 0:
                 similarity = 0.0
             else:
@@ -366,10 +273,8 @@ class GamePlayMixin:
                     item_norms[pid] = item_norm
                 denom = user_norm * item_norm
                 similarity = float(np.dot(user_vec, vec) / denom) if denom > 0 else 0.0
-
-            score = 3.0 + 1.7 * similarity + bias
-            score = float(min(5.0, max(1.0, score)))
-            scored.append((float(score), item))
+            score = float(min(5.0, max(1.0, 3.0 + 1.7 * similarity + bias)))
+            scored.append((score, item))
         scored.sort(key=lambda item: (item[0], str(item[1]["_id"])), reverse=True)
 
         ai_score, ai_pick_product = scored[0]
@@ -379,22 +284,16 @@ class GamePlayMixin:
         ai_exact = ai_pick_id == product_id
         human_points = 0 if ai_correct else 10
         ai_points = 10 if ai_correct else 0
-        ai_rank_of_pick = next(
-            (i + 1 for i, (_, p) in enumerate(scored) if str(p["_id"]) == product_id),
-            len(scored),
-        )
+        ai_rank_of_pick = next((i + 1 for i, (_, p) in enumerate(scored) if str(p["_id"]) == product_id), len(scored))
 
         human_pick_product = by_id[product_id]
         model.update_with_selection(state, human_pick_product, is_exception=False)
-
-        # Update game state
-        await db.games.update_one(
-            {"_id": ObjectId(str(game["_id"]))},
-            {"$set": {"model_state": state}},
-        )
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.model_state = state
 
         selected_ids = await self._current_selection_sequence(db, game, include_product_id=product_id)
-        post_metrics = await self._metrics_for_state(db, model, state, selected_ids)
+        post_metrics = await self._metrics_for_state(db, model, state, selected_ids, category)
 
         top_candidates = []
         for score, product in scored[:5]:
@@ -402,12 +301,10 @@ class GamePlayMixin:
             card["score"] = float(score)
             top_candidates.append(card)
 
-        # Build feature-level explanation
         human_vec = self.recommender.feature_space.vectorize(human_pick_product)
         ai_vec = self.recommender.feature_space.vectorize(ai_pick_product)
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
 
-        # Identify what features the user profile has learned to prefer
         inv_index = {v: k for k, v in self.recommender.feature_space.feature_index.items()}
         feature_weights = []
         for idx in range(len(user_vec)):
@@ -422,53 +319,25 @@ class GamePlayMixin:
         top_positive = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w > 0][:8])
         top_negative = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w < 0][:5])
 
-        # Human pick features
         human_features = [inv_index.get(i, f"f{i}") for i in range(len(human_vec)) if human_vec[i] > 0]
         ai_features = [inv_index.get(i, f"f{i}") for i in range(len(ai_vec)) if ai_vec[i] > 0]
         shared_raw = list(set(human_features) & set(ai_features))
         shared_features = [h for h in (humanize_feature(f) for f in shared_raw) if h is not None]
 
-        # -- Hidden preference detection --------------------------
-        all_selected_ids = await self._current_selection_sequence(
-            db, game, include_product_id=product_id
-        )
+        all_selected_ids = await self._current_selection_sequence(db, game, include_product_id=product_id)
         all_selected_products = await self._get_products_by_ids(
             db,
             all_selected_ids,
-            projection={
-                "category": 1,
-                "vendor": 1,
-                "product_type": 1,
-                "tags": 1,
-                "options": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
+            projection=self._feature_projection(category),
         )
         hidden_raw = model.detect_hidden_preferences(state, all_selected_products)
-        hidden_prefs = humanize_feature_list(
-            [(h["feature"], round(h["latency"], 3)) for h in hidden_raw]
-        )
-        # Generate human-readable hints
+        hidden_prefs = humanize_feature_list([(h["feature"], round(h["latency"], 3)) for h in hidden_raw])
         hidden_hints: list[str] = []
         for h in hidden_raw[:2]:
             label = humanize_feature(h["feature"])
             if label:
                 hidden_hints.append(
-                    f"The AI notices a hidden pattern: your picks tend to share \"{label}\" "
+                    f'The AI notices a hidden pattern: your picks tend to share "{label}" '
                     f"even though you may not have targeted it."
                 )
 
@@ -491,58 +360,40 @@ class GamePlayMixin:
                 f"which scored {ai_score:.2f} based on feature similarity to your profile."
             )
 
-        await db.game_rounds.update_one(
-            {"_id": round_doc["_id"]},
-            {
-                "$set": {
-                    "schema_version": 2,
-                    "human_pick_id": product_id,
-                    "ai_pick_id": ai_pick_id,
-                    "ai_confidence": float(ai_score),
-                    "ai_top_k": [
-                        {"product_id": str(product["_id"]), "score": float(score)}
-                        for score, product in scored[:5]
-                    ],
-                    "ai_top3_ids": ai_top3_ids,
-                    "ai_rank_of_pick": ai_rank_of_pick,
-                    "ai_correct": ai_correct,
-                    "human_points": human_points,
-                    "ai_points": ai_points,
-                    "post_metrics": post_metrics,
-                    "completed": True,
-                    "completed_at": datetime.utcnow(),
-                }
-            },
-        )
+        round_row.schema_version = 2
+        round_row.human_pick_id = product_id
+        round_row.ai_pick_id = ai_pick_id
+        round_row.ai_confidence = float(ai_score)
+        round_row.ai_top_k = [{"product_id": str(product["_id"]), "score": float(score)} for score, product in scored[:5]]
+        round_row.ai_top3_ids = ai_top3_ids
+        round_row.ai_rank_of_pick = ai_rank_of_pick
+        round_row.ai_correct = ai_correct
+        round_row.human_points = human_points
+        round_row.ai_points = ai_points
+        round_row.post_metrics = post_metrics
+        round_row.completed = True
+        round_row.completed_at = datetime.utcnow()
 
         new_current_round = game["current_round"] + 1
         new_human_total = game["human_score"] + human_points
         new_ai_total = game["ai_score"] + ai_points
         game_complete = new_current_round >= game["total_rounds"]
 
-        await db.games.update_one(
-            {"_id": game["_id"]},
-            {
-                "$set": {
-                    "current_round": new_current_round,
-                    "human_score": new_human_total,
-                    "ai_score": new_ai_total,
-                    "status": "completed" if game_complete else "playing",
-                    "model_state": state,
-                    "updated_at": datetime.utcnow(),
-                }
-            },
-        )
+        if game_row:
+            game_row.current_round = new_current_round
+            game_row.human_score = new_human_total
+            game_row.ai_score = new_ai_total
+            game_row.status = "completed" if game_complete else "playing"
+            game_row.model_state = state
+            game_row.updated_at = datetime.utcnow()
+        await db.commit()
 
         return {
             "round_number": round_number,
             "category": category,
             "category_copy": category_copy(category),
             "human_pick": self._product_card(human_pick_product, category),
-            "ai_pick": {
-                **self._product_card(ai_pick_product, category),
-                "score": float(ai_score),
-            },
+            "ai_pick": {**self._product_card(ai_pick_product, category), "score": float(ai_score)},
             "ai_correct": ai_correct,
             "ai_exact": ai_exact,
             "ai_rank_of_pick": ai_rank_of_pick,

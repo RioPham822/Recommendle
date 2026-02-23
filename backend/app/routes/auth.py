@@ -3,7 +3,7 @@ Authentication routes for user registration, login, and account management.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas_auth import (
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/register", response_model=AuthTokenOut)
 async def register(
     payload: UserRegister,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Register a new user and return auth token."""
     try:
@@ -49,7 +49,7 @@ async def register(
 @router.post("/login", response_model=AuthTokenOut)
 async def login(
     payload: UserLogin,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Login user and return auth token."""
     try:
@@ -67,7 +67,7 @@ async def login(
 @router.get("/user/{user_id}", response_model=UserOut)
 async def get_user(
     user_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get user information by user ID."""
     user = await auth_service.get_user(db, user_id)
@@ -87,7 +87,7 @@ async def get_user(
 async def change_password(
     payload: ChangePasswordRequest,
     user_id: str,  # Should come from auth header in production
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Change user password."""
     try:
@@ -114,7 +114,7 @@ async def change_password(
 async def logout(
     user_id: str,
     session_token: str,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Logout user by invalidating session token."""
     success = await auth_service.logout_user(db, user_id, session_token)

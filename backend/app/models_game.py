@@ -2,35 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
-from bson import ObjectId
 
 
-class PyObjectId(ObjectId):
-    """Pydantic validator for MongoDB ObjectId."""
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, source_type, handler):
-        from pydantic_core import core_schema
-        return core_schema.with_info_plain_validator_function(
-            cls.validate,
-            serialization=core_schema.plain_serializer_function_ser_schema(str),
-        )
-
-    @classmethod
-    def validate(cls, v, _info):
-        if not isinstance(v, ObjectId):
-            if isinstance(v, str) and ObjectId.is_valid(v):
-                return ObjectId(v)
-            raise ValueError("Invalid ObjectId")
-        return v
+def new_id() -> str:
+    return uuid4().hex
 
 
-class MongoModel(BaseModel):
-    """Base model for MongoDB documents."""
+class BaseDocModel(BaseModel):
+    """Base model for persisted game documents."""
 
-    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    id: Optional[str] = Field(default_factory=new_id, alias="_id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     model_config = {
@@ -39,7 +23,7 @@ class MongoModel(BaseModel):
     }
 
 
-class GameSession(MongoModel):
+class GameSession(BaseDocModel):
     """A complete game session with multiple rounds."""
     player_name: str
     status: str = "waiting"  # waiting, playing, completed
@@ -47,12 +31,12 @@ class GameSession(MongoModel):
     total_rounds: int = 5
     human_score: int = 0
     ai_score: int = 0
-    rounds: list[PyObjectId] = Field(default_factory=list)
+    rounds: list[str] = Field(default_factory=list)
 
 
-class GameRound(MongoModel):
+class GameRound(BaseDocModel):
     """A single round in the game."""
-    game_session_id: PyObjectId
+    game_session_id: str
     round_number: int
     mystery_user_id: str  # The user from the dataset we're predicting
     clue_pen_ids: list[str]  # 4 pens shown to players
@@ -65,7 +49,7 @@ class GameRound(MongoModel):
     completed: bool = False
 
 
-class UserSelection(MongoModel):
+class UserSelection(BaseDocModel):
     """Track a user's selections for training the model."""
     user_id: str  # Can be "dataset_user_{original_id}" for migrated users
     product_id: str

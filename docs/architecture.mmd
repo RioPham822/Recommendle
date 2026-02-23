@@ -1,4 +1,4 @@
-flowchart LR
+﻿flowchart LR
   %% Client / UI
   subgraph Client["Frontend (React + Vite)"]
     UI["Game UI\n(Welcome, Onboarding, Rounds, Summary)"]
@@ -19,7 +19,7 @@ flowchart LR
   end
 
   %% Database
-  subgraph Mongo["MongoDB (decidio)"]
+  subgraph Postgres["Postgres (decidio)"]
     Products[("products\nfountain_pens + movies")]
     Games[("games")]
     GameRounds[("game_rounds")]
@@ -31,11 +31,11 @@ flowchart LR
 
   %% Data pipelines / scripts
   subgraph DataPipelines["Data Pipelines (backend/scripts)"]
-    LoadPens["load_db.py\n(default target: Mongo)\nloads backend/data/products.json"]
-    IngestMovies["ingest_movies_tmdb.py\nTMDB -> Mongo products"]
+    LoadPens["load_db.py\n(default target: Postgres)\nloads backend/data/products.json"]
+    IngestMovies["ingest_movies_tmdb.py\nTMDB -> Postgres products"]
     Checkpoint["backend/data/tmdb_ingest_checkpoint.json\nresume state for movie ingest"]
     MigrateSchema["migrate_multicategory_schema.py\nbackfill category/schema_version + indexes"]
-    %% Legacy migration removed (Mongo-only architecture)
+    %% Legacy migration removed (Postgres-only architecture)
     Eval["evaluate_pbcf.py\noffline metrics + reports"]
   end
 
@@ -81,3 +81,4 @@ flowchart LR
   Eval --> GameRounds
 
   %% Legacy-only path removed
+

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -12,9 +13,7 @@ class ProductCard(BaseModel):
     subtitle: str | None = None
     price_min: float | None = None
     price_max: float | None = None
-    release_year: int | None = None
-    runtime_minutes: int | None = None
-    vote_average: float | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
     meta_badges: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     image_url: str | None = None

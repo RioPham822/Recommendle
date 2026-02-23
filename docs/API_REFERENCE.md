@@ -1,4 +1,4 @@
-# API Reference - Authentication & Database Tools
+﻿# API Reference - Authentication & Database Tools
 
 ## Quick Reference
 
@@ -39,8 +39,8 @@ Then select from menu:
 | `python test.py export-atlas` | Export all cloud collections to CSV |
 | `python test.py export-local-collection products` | Export specific local collection |
 | `python test.py export-atlas-collection games` | Export specific cloud collection |
-| `python test.py sync-local-to-atlas` | Upload local → cloud |
-| `python test.py sync-atlas-to-local` | Download cloud → local |
+| `python test.py sync-local-to-atlas` | Upload local â†’ cloud |
+| `python test.py sync-atlas-to-local` | Download cloud â†’ local |
 | `python test.py view-local` | View all local data (JSON) |
 | `python test.py summary-local` | Count documents in local DB |
 
@@ -220,7 +220,7 @@ localStorage.removeItem('tokenExpiry');
 - Check `isTokenExpired()` before making authenticated requests
 
 ### Q: CSV export file is empty
-- Ensure MongoDB is running and contains data
+- Ensure Postgres is running and contains data
 - Run `python test.py summary-local` to check document counts
 - Check that collection names are spelled correctly
 
@@ -232,14 +232,14 @@ localStorage.removeItem('tokenExpiry');
 
 ## Security Best Practices
 
-✅ **DO:**
+âœ… **DO:**
 - Store `session_token` in secure httpOnly cookies (recommended)
 - Validate tokens on backend for protected endpoints
 - Clear tokens on logout
 - Use HTTPS in production
 - Expire tokens after inactivity
 
-❌ **DON'T:**
+âŒ **DON'T:**
 - Send passwords in URLs
 - Store passwords in localStorage (only tokens)
 - Log or expose session tokens
@@ -255,9 +255,9 @@ Edit `backend/app/db.py` to change:
 # Session expiry time
 TOKEN_EXPIRY_DAYS = 7
 
-# MongoDB URLs
-MONGODB_URL = "mongodb://localhost:27017"  # Local
-ATLAS_URL = "mongodb+srv://..."            # Cloud
+# Postgres URLs
+Postgres_URL = "Postgres://localhost:27017"  # Local
+ATLAS_URL = "Postgres+srv://..."            # Cloud
 ```
 
 Edit `backend/app/services/auth.py` to change:
@@ -286,8 +286,9 @@ cat ./data/exports/products.csv
 python test.py view-local-collection users
 ```
 
-### Verify MongoDB connection
+### Verify Postgres connection
 ```bash
-python -c "from motor.motor_asyncio import AsyncIOMotorClient; import asyncio; asyncio.run(AsyncIOMotorClient('mongodb://localhost:27017').admin.command('ping'))"
+python -c "from SQLAlchemy.SQLAlchemy_asyncio import AsyncIOSQLAlchemyClient; import asyncio; asyncio.run(AsyncIOSQLAlchemyClient('Postgres://localhost:27017').admin.command('ping'))"
 ```
+
 

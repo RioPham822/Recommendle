@@ -1,11 +1,11 @@
 fastapi
 uvicorn
-motor
 pydantic
 pydantic-settings
 numpy
 requests
 python-multipart
-pymongo
+sqlalchemy
+asyncpg
 tqdm
 matplotlib

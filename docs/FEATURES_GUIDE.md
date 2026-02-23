@@ -1,4 +1,4 @@
-# New Features - Excel Export & User Authentication
+﻿# New Features - Excel Export & User Authentication
 
 ## 1. Excel/CSV Data Export
 
@@ -37,7 +37,7 @@ python test.py export-atlas-collection games
 ```
 
 ### What Gets Exported
-- All MongoDB collections are converted to CSV format
+- All Postgres collections are converted to CSV format
 - ObjectIds are converted to strings
 - DateTime fields are converted to ISO format
 - Nested objects and arrays are preserved as JSON strings
@@ -151,18 +151,18 @@ Users are stored in the `users` collection with:
 
 ### Security Features
 
-✅ Passwords hashed with PBKDF2 (100,000 iterations)
-✅ Unique usernames (case-insensitive)
-✅ Session tokens have 7-day expiry
-✅ Secure token generation with secrets module
-✅ Invalid credentials return generic error message
+âœ… Passwords hashed with PBKDF2 (100,000 iterations)
+âœ… Unique usernames (case-insensitive)
+âœ… Session tokens have 7-day expiry
+âœ… Secure token generation with secrets module
+âœ… Invalid credentials return generic error message
 
 ### Multiple Players
 
 Now multiple people can play independently:
 
-1. **User A** registers as "alice" → plays 5 games
-2. **User B** registers as "bob" → plays 10 games
+1. **User A** registers as "alice" â†’ plays 5 games
+2. **User B** registers as "bob" â†’ plays 10 games
 3. Each user has their own game history and leaderboard stats
 4. Games are linked to user accounts (not just player_name)
 
@@ -172,13 +172,13 @@ Now multiple people can play independently:
 
 ### Current (Without Auth)
 ```
-Player enters name → Picks category → Plays game
+Player enters name â†’ Picks category â†’ Plays game
 ```
 
 ### New (With Auth) - Recommended
 ```
-Register/Login → Player authenticated → Pick category → Plays game
-→ Game linked to user account → History saved per user
+Register/Login â†’ Player authenticated â†’ Pick category â†’ Plays game
+â†’ Game linked to user account â†’ History saved per user
 ```
 
 ### Gradual Migration
@@ -256,10 +256,11 @@ TOKEN_EXPIRY_DAYS = 7
 
 ## Next Steps
 
-1. ✅ Excel export added
-2. ✅ Auth system added
-3. 🔄 Update frontend to use authentication
-4. 🔄 Link games to authenticated users
-5. 🔄 Add password reset functionality (optional)
-6. 🔄 Add email verification (optional)
+1. âœ… Excel export added
+2. âœ… Auth system added
+3. ðŸ”„ Update frontend to use authentication
+4. ðŸ”„ Link games to authenticated users
+5. ðŸ”„ Add password reset functionality (optional)
+6. ðŸ”„ Add email verification (optional)
+
 
