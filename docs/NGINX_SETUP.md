@@ -168,7 +168,7 @@ Notes:
 ### 2. Restore local dump directly into live Docker DB (`decidio`)
 
 ```bash
-docker compose exec -T postgres pg_restore -U decidio -d decidio --clean --if-exists < data/decidio.db
+docker compose exec -T postgres pg_restore -U decidio -d decidio --clean --if-exists < decidio.db
 ```
 
 This replaces existing objects in the live app database. After restore, restart backend so caches/models refresh cleanly:

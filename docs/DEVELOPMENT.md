@@ -41,20 +41,18 @@ For clone-to-run setup, use the root `README.md`.
 2. FastAPI game routes in `backend/app/routes/game.py`.
 3. Game logic in `backend/app/services/game_service.py`.
 4. Model and feature-space logic in `backend/app/ml/prefix_cf.py`.
-5. Data read/write through Postgres collections.
+5. Data read/write through Postgres tables.
 
 ---
 
 ## 3. Data Model (Postgres)
 
-Primary collections:
+Primary tables:
 - `products`
 - `users`
-- `sessions`
-- `selections`
-- `prefix_ratings`
 - `games`
 - `game_rounds`
+- `prefix_ratings`
 
 Category-aware product docs include `category` and `schema_version`.
 
@@ -82,11 +80,8 @@ Startup schema validation:
 - `GET /api/game/leaderboard`
 - `GET /api/game/player/{player_name}/history`
 
-### Legacy recommendation APIs (still present)
+### Additional APIs (still present)
 - `/api/products`
-- `/api/users`
-- `/api/sessions/*`
-- `/api/debug/pbcf`
 
 ---
 
@@ -203,14 +198,13 @@ Fix:
 ### Postgres connection failure
 Check:
 - Postgres service is running.
-- `Postgres_URL` / `Postgres_DB_NAME` in `backend/.env`.
+- `DATABASE_URL` in `backend/.env`.
 
 ---
 
 ## 10. Limitations and Next Priorities
 
 ### Current limitations
-- No auth/user accounts for production identity.
 - Recommendation quality depends on dataset size and quality.
 
 ### Recommended next steps

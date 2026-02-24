@@ -184,7 +184,7 @@ Warning:
 
 ## When To Run Data Scripts
 - Run `docker compose exec backend python -m scripts.load_db`:
-  - right after first `docker compose up --build -d` on a new machine
+  - right after first `docker compose up --build -d postgres backend` on a new machine
   - any time you reset volumes with `docker compose down -v`
   - any time `fountain_pens` count drops below 50
 - Run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies ...`:

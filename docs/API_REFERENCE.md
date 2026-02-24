@@ -1,294 +1,96 @@
-﻿# API Reference - Authentication & Database Tools
+﻿# API Reference
 
-## Quick Reference
+Current backend API reference for this repository.
 
-### Authentication Endpoints
-All endpoints return JSON responses.
+Base URL examples:
+- Local: `http://localhost:8015`
+- Public (via Nginx): `https://sd-vm23.csc.ncsu.edu`
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Register new user |
-| POST | `/api/auth/login` | Login & get session token |
-| GET | `/api/auth/user/{user_id}` | Get user info |
-| POST | `/api/auth/change-password` | Change password |
-| POST | `/api/auth/logout` | Logout (invalidate token) |
+## Authentication
 
----
+### POST `/api/auth/register`
+Register a new user and auto-login.
 
-## Database Export Command Reference
-
-### Interactive Mode
-```bash
-cd backend
-python test.py
+Request body:
+```json
+{
+  "username": "alice",
+  "password": "MyPassword123",
+  "display_name": "Alice Smith"
+}
 ```
 
-Then select from menu:
-- **7** - Export Local Database to Excel
-- **8** - Export Atlas (Cloud) Database to Excel
-- **9** - Export Specific Local Collection
-- **10** - Export Specific Cloud Collection
-- **11** - Local Database Summary
-- **12** - Cloud Database Summary
+### POST `/api/auth/login`
+Login and return session token.
 
-### Command-Line Mode
+Request body:
+```json
+{
+  "username": "alice",
+  "password": "MyPassword123"
+}
+```
 
-| Command | Description |
-|---------|-------------|
-| `python test.py export-local` | Export all local collections to CSV |
-| `python test.py export-atlas` | Export all cloud collections to CSV |
-| `python test.py export-local-collection products` | Export specific local collection |
-| `python test.py export-atlas-collection games` | Export specific cloud collection |
-| `python test.py sync-local-to-atlas` | Upload local â†’ cloud |
-| `python test.py sync-atlas-to-local` | Download cloud â†’ local |
-| `python test.py view-local` | View all local data (JSON) |
-| `python test.py summary-local` | Count documents in local DB |
+### GET `/api/auth/user/{user_id}`
+Get public user profile.
 
----
+### POST `/api/auth/change-password?user_id={user_id}`
+Change password.
 
-## Authentication Examples
+Request body:
+```json
+{
+  "old_password": "MyPassword123",
+  "new_password": "NewPassword456"
+}
+```
 
-### 1. Register User
+Note: current backend expects `user_id` as query parameter.
+
+### POST `/api/auth/logout?user_id={user_id}&session_token={token}`
+Invalidate one session token.
+
+Note: current backend expects both values as query parameters.
+
+## Game APIs
+
+- `GET /api/game/categories`
+- `POST /api/game/start`
+- `GET /api/game/resume-state?player_name=...&category=...`
+- `GET /api/game/{game_id}/onboarding`
+- `POST /api/game/{game_id}/onboarding/submit`
+- `POST /api/game/{game_id}/round/start`
+- `POST /api/game/{game_id}/round/{round_number}/pick`
+- `GET /api/game/{game_id}/status`
+- `GET /api/game/{game_id}/summary`
+- `GET /api/game/leaderboard?limit=10&category=fountain_pens`
+- `GET /api/game/player/{player_name}/history?category=fountain_pens&limit=20`
+
+## Product APIs
+
+- `GET /api/products`
+- `GET /api/products/{product_id}`
+
+## Backend DB Utility (`backend/test.py`)
+
+From `backend/`:
+
+```bash
+python test.py summary
+python test.py list-collections
+python test.py clear-games
+```
+
+Available commands are currently limited to the three above.
+
+## Example cURL
+
 ```bash
 curl -X POST http://localhost:8015/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{
-    "username": "alice",
-    "password": "MyPassword123",
-    "display_name": "Alice Smith"
-  }'
+  -d '{"username":"alice","password":"MyPassword123","display_name":"Alice"}'
 ```
 
-**Response:**
-```json
-{
-  "user_id": "507f1f77bcf86cd799439011",
-  "username": "alice",
-  "display_name": "Alice Smith",
-  "session_token": "xB9kL2pQ7tF4mN8vR...",
-  "expires_at": "2026-02-26T12:00:00"
-}
-```
-
-### 2. Login User
 ```bash
-curl -X POST http://localhost:8015/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "alice",
-    "password": "MyPassword123"
-  }'
+curl -X POST "http://localhost:8015/api/auth/logout?user_id=<USER_ID>&session_token=<TOKEN>"
 ```
-
-### 3. Get User Profile
-```bash
-curl http://localhost:8015/api/auth/user/507f1f77bcf86cd799439011
-```
-
-**Response:**
-```json
-{
-  "id": "507f1f77bcf86cd799439011",
-  "username": "alice",
-  "display_name": "Alice Smith",
-  "created_at": "2026-02-19T10:30:00"
-}
-```
-
-### 4. Change Password
-```bash
-curl -X POST http://localhost:8015/api/auth/change-password \
-  -H "Content-Type: application/json" \
-  -d '{
-    "old_password": "MyPassword123",
-    "new_password": "NewPassword456"
-  }' \
-  -H "Authorization: Bearer xB9kL2pQ7tF4mN8vR..."
-```
-
-### 5. Logout
-```bash
-curl -X POST http://localhost:8015/api/auth/logout \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "507f1f77bcf86cd799439011",
-    "session_token": "xB9kL2pQ7tF4mN8vR..."
-  }'
-```
-
----
-
-## Frontend Integration
-
-### Store Auth Info (after login)
-```javascript
-// Upon successful login/register
-localStorage.setItem('userId', response.user_id);
-localStorage.setItem('sessionToken', response.session_token);
-localStorage.setItem('displayName', response.display_name);
-localStorage.setItem('tokenExpiry', response.expires_at);
-```
-
-### Use Auth in API Calls
-```javascript
-const headers = {
-  'Content-Type': 'application/json',
-};
-
-if (localStorage.getItem('sessionToken')) {
-  headers['Authorization'] = `Bearer ${localStorage.getItem('sessionToken')}`;
-}
-
-// Then in fetch requests
-fetch(url, { method: 'POST', headers, body: JSON.stringify(...) })
-```
-
-### Check Token Expiry
-```javascript
-function isTokenExpired() {
-  const expiry = new Date(localStorage.getItem('tokenExpiry'));
-  return new Date() > expiry;
-}
-```
-
-### Logout (clear storage)
-```javascript
-localStorage.removeItem('userId');
-localStorage.removeItem('sessionToken');
-localStorage.removeItem('displayName');
-localStorage.removeItem('tokenExpiry');
-// Redirect to login screen
-```
-
----
-
-## Database Schema
-
-### Users Collection
-```javascript
-{
-  _id: ObjectId,
-  username: String (unique, lowercase),
-  password_hash: String,
-  display_name: String,
-  created_at: Date,
-  updated_at: Date,
-  games: [ObjectId],  // References to game documents
-  session_tokens: [
-    {
-      token: String,
-      created_at: Date,
-      expires_at: Date,
-      ip_address: String
-    }
-  ]
-}
-```
-
-### Games Collection (after auth integration)
-```javascript
-{
-  _id: ObjectId,
-  player_name: String,
-  user_id: ObjectId,  // NEW: Reference to user
-  category: String,
-  status: String,
-  total_rounds: Number,
-  human_score: Number,
-  ai_score: Number,
-  created_at: Date,
-  updated_at: Date
-}
-```
-
----
-
-## Common Issues & Solutions
-
-### Q: "Username already exists"
-- Choose a different username
-- Username is case-insensitive (alice = ALICE = Alice)
-
-### Q: "Invalid username or password" on login
-- Check spelling of username (case-insensitive)
-- Password is case-sensitive
-- Minimum 6 characters required
-
-### Q: "Session token expired"
-- User was logged in for 7+ days
-- Implement re-login on frontend when token expires
-- Check `isTokenExpired()` before making authenticated requests
-
-### Q: CSV export file is empty
-- Ensure Postgres is running and contains data
-- Run `python test.py summary-local` to check document counts
-- Check that collection names are spelled correctly
-
-### Q: CORS error when making auth requests
-- CORS is configured for localhost:5173 and Render
-- If using different origin, update `allowed_origins` in `main.py`
-
----
-
-## Security Best Practices
-
-âœ… **DO:**
-- Store `session_token` in secure httpOnly cookies (recommended)
-- Validate tokens on backend for protected endpoints
-- Clear tokens on logout
-- Use HTTPS in production
-- Expire tokens after inactivity
-
-âŒ **DON'T:**
-- Send passwords in URLs
-- Store passwords in localStorage (only tokens)
-- Log or expose session tokens
-- Reuse tokens across devices/sessions
-- Allow session tokens to persist forever
-
----
-
-## Configuration
-
-Edit `backend/app/db.py` to change:
-```python
-# Session expiry time
-TOKEN_EXPIRY_DAYS = 7
-
-# Postgres URLs
-Postgres_URL = "Postgres://localhost:27017"  # Local
-ATLAS_URL = "Postgres+srv://..."            # Cloud
-```
-
-Edit `backend/app/services/auth.py` to change:
-```python
-# Password hashing iterations (higher = more secure but slower)
-hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), ..., 100000)
-```
-
----
-
-## Troubleshooting
-
-### Check local data was exported
-```bash
-ls -la ./data/exports/
-```
-
-### View exported data
-```bash
-cat ./data/exports/products.csv
-# Or open in Excel
-```
-
-### Check user was created
-```bash
-python test.py view-local-collection users
-```
-
-### Verify Postgres connection
-```bash
-python -c "from SQLAlchemy.SQLAlchemy_asyncio import AsyncIOSQLAlchemyClient; import asyncio; asyncio.run(AsyncIOSQLAlchemyClient('Postgres://localhost:27017').admin.command('ping'))"
-```
-
-

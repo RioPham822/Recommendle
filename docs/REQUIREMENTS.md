@@ -20,7 +20,7 @@ Users making a sequence of related product decisions (for example, choosing a se
 
 ### Out of Scope (Current Product)
 - Native mobile app
-- Full account/auth system
+- Advanced auth/authorization features (RBAC, OAuth, password reset, email verification)
 - Explicit drag-reorder/swipe UX
 - Production deployment requirements (HA, autoscaling, SSO, etc.)
 
@@ -86,7 +86,7 @@ Status legend:
 
 ### 6.4 Product Constraints
 - Current system is web-first, not native mobile.
-- Authentication, authorization, and multi-tenant account management are not implemented.
+- Basic authentication is implemented; advanced authorization and multi-tenant account management are not implemented.
 - Current rounds are fixed in code to 5 for game mode.
 
 ## 7. Requirement Traceability to Initial Statement
