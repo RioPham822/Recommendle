@@ -1,74 +1,128 @@
-﻿flowchart LR
-  %% Client / UI
-  subgraph Client["Frontend (React + Vite)"]
-    UI["Game UI\n(Auth, Welcome, Onboarding, Rounds, Summary)"]
-    APIClient["src/lib/api.js"]
-    UI --> APIClient
+flowchart LR
+  %% =====================
+  %% Runtime / Deployment
+  %% =====================
+  subgraph Runtime["Runtime / Deployment"]
+    Browser["User Browser"]
+    Nginx["Nginx (optional VM reverse proxy)\ndeploy/nginx/decidio.conf"]
+    LocalFE["Frontend container (optional)\nReact + Vite dev server :5173"]
+    BackendSvc["Backend container\nFastAPI + Uvicorn :8015"]
+    PostgresSvc["Postgres container\npostgres:16"]
   end
 
-  %% Backend runtime
-  subgraph Backend["Backend (FastAPI - app.main)"]
-    Main["main.py\nstartup: init_db + schema check + model refresh"]
+  Browser -->|HTTPS| Nginx
+  Nginx -->|/api + static| BackendSvc
+  Browser -->|http://localhost:5173| LocalFE
+  LocalFE -->|VITE_API_BASE_URL -> /api| BackendSvc
+  BackendSvc -->|asyncpg| PostgresSvc
+
+  %% =====================
+  %% Frontend
+  %% =====================
+  subgraph Frontend["Frontend (frontend/src)"]
+    AppUI["UI Components\nAuthScreen, WelcomeScreen, RoundArena, Summary"]
+    ApiClient["lib/api.js\nfetch wrapper + auth token localStorage"]
+    AppUI --> ApiClient
+  end
+
+  Browser --> AppUI
+
+  %% =====================
+  %% FastAPI App
+  %% =====================
+  subgraph FastAPI["FastAPI App (backend/app/main.py)"]
+    Startup["startup event\ninit_db -> verify_connection\nensure_multicategory_compatibility\nrecommender.refresh"]
+    ProductEndpoints["/api/products\n/api/products/{id}"]
     GameRoutes["routes/game.py\n/api/game/*"]
     AuthRoutes["routes/auth.py\n/api/auth/*"]
-    ProductRoutes["main.py routes\n/api/products*"]
-    GameService["services/game_service.py\nsession flow, scoring, explanations"]
-    AuthService["services/auth.py\nregistration/login/session tokens"]
-    Recommender["services/recommender.py\nfeature space + cached item vectors"]
-    Model["ml/prefix_cf.py\nPrefixCFModel + hidden preference detection"]
-    CategoryProfiles["category_profiles.py\ncategory config + feature extraction labels"]
-    SchemaGuard["services/schema_service.py\ncategory compatibility checks"]
+    StaticMount["Static mount\nserve frontend/dist when available"]
   end
 
-  %% Database
-  subgraph Postgres["Postgres (decidio)"]
-    Products[("products")]
-    Users[("users")]
-    Games[("games")]
-    GameRounds[("game_rounds")]
-    PrefixRatings[("prefix_ratings")]
+  ApiClient -->|HTTP JSON| ProductEndpoints
+  ApiClient -->|HTTP JSON| GameRoutes
+  ApiClient -->|HTTP JSON| AuthRoutes
+  Startup --> ProductEndpoints
+  Startup --> GameRoutes
+  Startup --> AuthRoutes
+  Startup --> StaticMount
+
+  %% =====================
+  %% Services / ML
+  %% =====================
+  subgraph Services["Backend Services"]
+    GameService["services/game_service.py\ncomposition root"]
+    GamePlay["services/game_play.py\nonboarding, round start, pick scoring"]
+    GameInsights["services/game_insights.py\nsummary, status, leaderboard, history"]
+    AuthService["services/auth.py\nPBKDF2 password hash + session tokens"]
+    SchemaService["services/schema_service.py\ncategory/schema compatibility"]
+    CategoryProfiles["category_profiles.py\ncategory config + feature labels"]
   end
-
-  %% Data pipelines / scripts
-  subgraph DataPipelines["Data Pipelines (backend/scripts)"]
-    LoadPens["load_db.py\nloads backend/data/products.json"]
-    IngestMovies["ingest_movies_tmdb.py\nTMDB -> products(category=movies)"]
-    Checkpoint["backend/data/tmdb_ingest_checkpoint.json\nmovie ingest resume state"]
-    MigrateSchema["migrate_multicategory_schema.py\ncompatibility helper"]
-    Eval["evaluate_pbcf.py\noffline metrics + reports"]
-  end
-
-  %% Runtime request flow
-  APIClient -->|HTTP /api/game/*| GameRoutes
-  APIClient -->|HTTP /api/auth/*| AuthRoutes
-  APIClient -->|HTTP /api/products*| ProductRoutes
-
-  Main --> SchemaGuard
-  Main --> Recommender
-  Main --> GameRoutes
-  Main --> AuthRoutes
 
   GameRoutes --> GameService
+  GameService --> GamePlay
+  GameService --> GameInsights
+  GamePlay --> CategoryProfiles
+  GameInsights --> CategoryProfiles
   AuthRoutes --> AuthService
-  GameService --> Recommender
-  GameService --> Model
-  GameService --> CategoryProfiles
+  Startup --> SchemaService
 
-  %% Data access flow
-  ProductRoutes --> Products
+  subgraph ML["ML / Recommendation"]
+    Recommender["services/recommender.py\ncache item vectors + refresh"]
+    PrefixCF["ml/prefix_cf.py\nFeatureSpace + PrefixCFModel"]
+    PBCF["ml/pbcf_nmf.py\nPBCFEngine (NMF-based)"]
+  end
+
+  Startup --> Recommender
+  GameService --> Recommender
+  GamePlay --> PrefixCF
+  GameInsights --> PrefixCF
+  Recommender --> PrefixCF
+  Recommender --> PBCF
+
+  %% =====================
+  %% Database schema
+  %% =====================
+  subgraph DB["Postgres Tables (backend/app/db.py)"]
+    Products[("products")]
+    Users[("users\npassword_hash + session_tokens[]")]
+    Games[("games\nmodel_state + onboarding state")]
+    Rounds[("game_rounds\nround outcomes + ai_top_k")]
+    PrefixRatings[("prefix_ratings\nonboarding ratings")]
+  end
+
+  ProductEndpoints --> Products
   AuthService --> Users
+  GameService --> Games
+  GameService --> Rounds
+  GameService --> PrefixRatings
   GameService --> Products
   GameService --> Users
-  GameService --> Games
-  GameService --> GameRounds
-  GameService --> PrefixRatings
+  Recommender --> Products
+  Recommender --> PrefixRatings
+  Recommender --> Games
+  Recommender --> Rounds
 
-  %% Ingestion / evaluation flow
-  LoadPens --> Products
-  IngestMovies --> Products
-  IngestMovies --> Checkpoint
-  MigrateSchema --> Products
-  MigrateSchema --> Games
-  MigrateSchema --> GameRounds
-  Eval --> Games
-  Eval --> GameRounds
+  %% =====================
+  %% Data pipelines
+  %% =====================
+  subgraph Pipelines["Data / Evaluation Scripts (backend/scripts)"]
+    LoadDB["load_db.py\nseed products.json (fountain_pens)"]
+    ScrapePens["scrape_gouletpens.py\nbuild pen dataset"]
+    IngestTMDB["ingest_movies_tmdb.py\nTMDB -> products(category=movies)"]
+    Migrate["migrate_multicategory_schema.py\ncategory migration helper"]
+    Evaluate["evaluate_pbcf.py\noffline model metrics"]
+    Checkpoint["backend/data/tmdb_ingest_checkpoint.json"]
+    LocalData["backend/data/products.json"]
+  end
+
+  LocalData --> LoadDB
+  ScrapePens --> LocalData
+  LoadDB --> Products
+  IngestTMDB --> Products
+  IngestTMDB --> Checkpoint
+  Migrate --> Products
+  Migrate --> Games
+  Migrate --> Rounds
+  Evaluate --> Games
+  Evaluate --> Rounds
+  Evaluate --> PrefixRatings
