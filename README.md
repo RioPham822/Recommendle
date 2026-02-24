@@ -1,4 +1,4 @@
-# Recommendle
+﻿# Recommendle
 
 Recommendle is an interactive web game where a human player competes against an AI recommendation model.  
 It is a CSC 492 Senior Design project focused on **sequential preference modeling**: learning user taste from a sequence of choices instead of one-off ratings.
@@ -19,7 +19,7 @@ It is a CSC 492 Senior Design project focused on **sequential preference modelin
 - Tracks leaderboard and player history by category.
 - Detects hidden/latent preference patterns and surfaces "hidden gems."
 
-## ✨ NEW FEATURES (Feb 2026)
+## New Features (Feb 2026)
 - **Excel/CSV Export**: Export database collections to Excel-compatible CSV format
   - Interactive menu for easy selection
   - Command-line support for scripting
@@ -72,10 +72,16 @@ git clone https://github.com/ncstate-csc-sdc/2026Spring-Team42-Decidio-3.git
 cd 2026Spring-Team42-Decidio-3
 ```
 
-### 2. Start full stack (Postgres + backend + frontend)
+### 2. Start backend services (Postgres + backend)
 From repo root:
 ```bash
-docker compose up --build -d
+docker compose up --build -d postgres backend
+```
+
+### 2b. (Optional) Start local frontend container
+If you want the frontend in Docker for local testing:
+```bash
+docker compose --profile local-frontend up -d frontend
 ```
 
 ### 3. Load the fountain pen dataset (required once per new database)
@@ -106,8 +112,11 @@ Notes:
 - If interrupted, rerun the same command to resume.
 
 ### 5. Open app
-- Frontend dev URL: `http://localhost:5173`
-- Backend API URL: `http://localhost:8015`
+- Local frontend (if profile enabled): `http://localhost:5173`
+- Local backend API: `http://localhost:8015`
+- Public backend (recommended for hosted frontend): `https://<your-vm-domain>`
+
+For VM + Nginx deployment details, see [NGINX_SETUP.md](docs/NGINX_SETUP.md).
 
 ### 6. Stop services
 ```bash
@@ -123,8 +132,13 @@ docker compose down -v
 
 ## Quick Start (Any OS)
 ```bash
-docker compose up --build -d
+docker compose up --build -d postgres backend
 docker compose exec backend python -m scripts.load_db
+```
+
+Local frontend (optional):
+```bash
+docker compose --profile local-frontend up -d frontend
 ```
 
 ---
@@ -217,3 +231,4 @@ docker compose up -d --build
 
 ## License
 Developed as part of CSC 492 (Senior Design coursework).
+

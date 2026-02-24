@@ -50,7 +50,7 @@ __pycache__/
 backend/reports/
 
 # ── Database files ──
-decidio.db
+*.db
 *.csv
 
 
@@ -68,3 +68,5 @@ nul
 
 backend/backups/
 backend/data/tmdb_ingest_checkpoint.json
+
+*.conf

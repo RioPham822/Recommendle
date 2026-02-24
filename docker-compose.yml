@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: decidio_pass
       POSTGRES_DB: decidio
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - decidio_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -35,9 +35,10 @@ services:
     volumes:
       - ./backend/data:/app/data
     ports:
-      - "8015:8015"
+      - "127.0.0.1:8015:8015"
 
   frontend:
+    profiles: ["local-frontend"] # starts only when requested
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -46,9 +47,9 @@ services:
     depends_on:
       - backend
     environment:
-      VITE_API_BASE_URL: http://localhost:8015
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8015}
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
 
 volumes:
   decidio_pgdata:
