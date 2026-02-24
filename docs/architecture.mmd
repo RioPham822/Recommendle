@@ -4,10 +4,10 @@ flowchart LR
   %% =====================
   subgraph Runtime["Runtime / Deployment"]
     Browser["User Browser"]
-    Nginx["Nginx (optional VM reverse proxy)\ndeploy/nginx/decidio.conf"]
-    LocalFE["Frontend container (optional)\nReact + Vite dev server :5173"]
-    BackendSvc["Backend container\nFastAPI + Uvicorn :8015"]
-    PostgresSvc["Postgres container\npostgres:16"]
+    Nginx["Nginx (optional VM reverse proxy)<br>deploy/nginx/decidio.conf"]
+    LocalFE["Frontend container (optional)<br>React + Vite dev server :5173"]
+    BackendSvc["Backend container<br>FastAPI + Uvicorn :8015"]
+    PostgresSvc["Postgres container<br>postgres:16"]
   end
 
   Browser -->|HTTPS| Nginx
@@ -20,8 +20,8 @@ flowchart LR
   %% Frontend
   %% =====================
   subgraph Frontend["Frontend (frontend/src)"]
-    AppUI["UI Components\nAuthScreen, WelcomeScreen, RoundArena, Summary"]
-    ApiClient["lib/api.js\nfetch wrapper + auth token localStorage"]
+    AppUI["UI Components<br>AuthScreen, WelcomeScreen, RoundArena, Summary"]
+    ApiClient["lib/api.js<br>fetch wrapper + auth token localStorage"]
     AppUI --> ApiClient
   end
 
@@ -31,11 +31,11 @@ flowchart LR
   %% FastAPI App
   %% =====================
   subgraph FastAPI["FastAPI App (backend/app/main.py)"]
-    Startup["startup event\ninit_db -> verify_connection\nensure_multicategory_compatibility\nrecommender.refresh"]
-    ProductEndpoints["/api/products\n/api/products/{id}"]
-    GameRoutes["routes/game.py\n/api/game/*"]
-    AuthRoutes["routes/auth.py\n/api/auth/*"]
-    StaticMount["Static mount\nserve frontend/dist when available"]
+    Startup["startup event<br>init_db -> verify_connection<br>ensure_multicategory_compatibility<br>recommender.refresh"]
+    ProductEndpoints["/api/products<br>/api/products/{id}"]
+    GameRoutes["routes/game.py<br>/api/game/*"]
+    AuthRoutes["routes/auth.py<br>/api/auth/*"]
+    StaticMount["Static mount<br>serve frontend/dist when available"]
   end
 
   ApiClient -->|HTTP JSON| ProductEndpoints
@@ -50,12 +50,12 @@ flowchart LR
   %% Services / ML
   %% =====================
   subgraph Services["Backend Services"]
-    GameService["services/game_service.py\ncomposition root"]
-    GamePlay["services/game_play.py\nonboarding, round start, pick scoring"]
-    GameInsights["services/game_insights.py\nsummary, status, leaderboard, history"]
-    AuthService["services/auth.py\nPBKDF2 password hash + session tokens"]
-    SchemaService["services/schema_service.py\ncategory/schema compatibility"]
-    CategoryProfiles["category_profiles.py\ncategory config + feature labels"]
+    GameService["services/game_service.py<br>composition root"]
+    GamePlay["services/game_play.py<br>onboarding, round start, pick scoring"]
+    GameInsights["services/game_insights.py<br>summary, status, leaderboard, history"]
+    AuthService["services/auth.py<br>PBKDF2 password hash + session tokens"]
+    SchemaService["services/schema_service.py<br>category/schema compatibility"]
+    CategoryProfiles["category_profiles.py<br>category config + feature labels"]
   end
 
   GameRoutes --> GameService
@@ -67,9 +67,9 @@ flowchart LR
   Startup --> SchemaService
 
   subgraph ML["ML / Recommendation"]
-    Recommender["services/recommender.py\ncache item vectors + refresh"]
-    PrefixCF["ml/prefix_cf.py\nFeatureSpace + PrefixCFModel"]
-    PBCF["ml/pbcf_nmf.py\nPBCFEngine (NMF-based)"]
+    Recommender["services/recommender.py<br>cache item vectors + refresh"]
+    PrefixCF["ml/prefix_cf.py<br>FeatureSpace + PrefixCFModel"]
+    PBCF["ml/pbcf_nmf.py<br>PBCFEngine (NMF-based)"]
   end
 
   Startup --> Recommender
@@ -84,10 +84,10 @@ flowchart LR
   %% =====================
   subgraph DB["Postgres Tables (backend/app/db.py)"]
     Products[("products")]
-    Users[("users\npassword_hash + session_tokens[]")]
-    Games[("games\nmodel_state + onboarding state")]
-    Rounds[("game_rounds\nround outcomes + ai_top_k")]
-    PrefixRatings[("prefix_ratings\nonboarding ratings")]
+    Users[("users<br>password_hash + session_tokens[]")]
+    Games[("games<br>model_state + onboarding state")]
+    Rounds[("game_rounds<br>round outcomes + ai_top_k")]
+    PrefixRatings[("prefix_ratings<br>onboarding ratings")]
   end
 
   ProductEndpoints --> Products
@@ -106,11 +106,11 @@ flowchart LR
   %% Data pipelines
   %% =====================
   subgraph Pipelines["Data / Evaluation Scripts (backend/scripts)"]
-    LoadDB["load_db.py\nseed products.json (fountain_pens)"]
-    ScrapePens["scrape_gouletpens.py\nbuild pen dataset"]
-    IngestTMDB["ingest_movies_tmdb.py\nTMDB -> products(category=movies)"]
-    Migrate["migrate_multicategory_schema.py\ncategory migration helper"]
-    Evaluate["evaluate_pbcf.py\noffline model metrics"]
+    LoadDB["load_db.py<br>seed products.json (fountain_pens)"]
+    ScrapePens["scrape_gouletpens.py<br>build pen dataset"]
+    IngestTMDB["ingest_movies_tmdb.py<br>TMDB -> products(category=movies)"]
+    Migrate["migrate_multicategory_schema.py<br>category migration helper"]
+    Evaluate["evaluate_pbcf.py<br>offline model metrics"]
     Checkpoint["backend/data/tmdb_ingest_checkpoint.json"]
     LocalData["backend/data/products.json"]
   end
