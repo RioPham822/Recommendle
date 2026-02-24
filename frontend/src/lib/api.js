@@ -75,15 +75,21 @@ export async function logoutUser(userId, sessionToken) {
 
 // ============ GAME ENDPOINTS ============
 
-export async function startGame(playerName, category = 'fountain_pens') {
+export async function startGame(playerName, category = 'fountain_pens', freshStart = false) {
   return request('/api/game/start', {
     method: 'POST',
-    body: JSON.stringify({ player_name: playerName, category }),
+    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart }),
   });
 }
 
 export async function getCategories() {
   return request('/api/game/categories');
+}
+
+export async function getResumeState(playerName, category = 'fountain_pens') {
+  return request(
+    `/api/game/resume-state?player_name=${encodeURIComponent(playerName)}&category=${encodeURIComponent(category)}`,
+  );
 }
 
 export async function getOnboarding(gameId) {

@@ -36,6 +36,7 @@ class GameCreate(BaseModel):
 
     player_name: str = Field(..., min_length=1, max_length=80)
     category: str = Field(default="fountain_pens")
+    fresh_start: bool = Field(default=False)
 
 
 class GameOut(BaseModel):
@@ -49,6 +50,20 @@ class GameOut(BaseModel):
     human_score: int
     ai_score: int
     created_at: datetime
+    resumed: bool = False
+
+
+class ResumableGameOut(BaseModel):
+    """Whether player/category has an active game to continue."""
+
+    exists: bool
+    can_start_fresh: bool = False
+    game_id: str | None = None
+    player_name: str | None = None
+    category: str = "fountain_pens"
+    status: str | None = None
+    current_round: int | None = None
+    total_rounds: int | None = None
 
 
 class OnboardingOut(BaseModel):

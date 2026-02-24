@@ -19,6 +19,7 @@ from ..schemas_game import (
     OnboardingSubmit,
     OnboardingSubmitOut,
     PlayerGameEntry,
+    ResumableGameOut,
     RoundPickSubmit,
     RoundResultOut,
     RoundStartOut,
@@ -75,8 +76,23 @@ async def start_game(
             player_name=payload.player_name,
             category=payload.category,
             total_rounds=5,
+            fresh_start=payload.fresh_start,
         )
         return GameOut(**game)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/resume-state", response_model=ResumableGameOut)
+async def get_resume_state(
+    player_name: str,
+    category: str = "fountain_pens",
+    db: AsyncSession = Depends(get_db),
+):
+    """Return whether this player/category has an in-progress game."""
+    try:
+        result = await game_service.get_resume_state(db, player_name=player_name, category=category)
+        return ResumableGameOut(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

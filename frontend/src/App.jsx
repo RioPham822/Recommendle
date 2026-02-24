@@ -12,12 +12,13 @@ import RoundResultPanel from './components/RoundResultPanel';
 import SetRatingModal from './components/SetRatingModal';
 import WelcomeScreen from './components/WelcomeScreen';
 import {
-    getCategories,
-    getLeaderboard,
-    getOnboarding,
-    startGame,
-    startRound,
-    submitOnboarding,
+  getCategories,
+  getLeaderboard,
+  getOnboarding,
+  getResumeState,
+  startGame,
+  startRound,
+  submitOnboarding,
     submitRoundPick,
     logoutUser,
     getAuthToken,
@@ -84,6 +85,8 @@ export default function App() {
   });
   const [welcomeLeaderboard, setWelcomeLeaderboard] = useState([]);
   const [viewingPlayer, setViewingPlayer] = useState(null);
+  const [resumableGame, setResumableGame] = useState(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
 
   const activeCategory = game?.category || selectedCategory;
 
@@ -154,6 +157,44 @@ export default function App() {
       .catch(() => {});
   }, [selectedCategory]);
 
+  // Detect resumable game for current player/category on welcome screen.
+  useEffect(() => {
+    let cancelled = false;
+    const loadResumeState = async () => {
+      if (!isAuthenticated || view !== VIEW.WELCOME) {
+        setResumeLoading(false);
+        return;
+      }
+      if (categoriesLoading) {
+        setResumeLoading(false);
+        return;
+      }
+      const name = playerName.trim();
+      if (!name) {
+        setResumableGame(null);
+        setResumeLoading(false);
+        return;
+      }
+      setResumeLoading(true);
+      try {
+        const state = await getResumeState(name, selectedCategory);
+        if (!cancelled) {
+          setResumableGame(state);
+          setResumeLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setResumableGame(null);
+          setResumeLoading(false);
+        }
+      }
+    };
+    loadResumeState();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, view, playerName, selectedCategory, categoriesLoading]);
+
   // Handle login success
   const handleLoginSuccess = (authData) => {
     setIsAuthenticated(true);
@@ -222,6 +263,8 @@ export default function App() {
     setRoundResult(null);
     setLeaderboard([]);
     setError('');
+    setResumableGame(null);
+    setResumeLoading(false);
     setBusy({ start: false, onboarding: false, pick: false, next: false });
     // Refresh welcome leaderboard
     getLeaderboard(10, selectedCategory)
@@ -236,7 +279,7 @@ export default function App() {
     setView(VIEW.ROUND);
   }
 
-  async function handleStart() {
+  async function handleStart(freshStart = false) {
     setError('');
     const selected = categories.find((c) => c.id === selectedCategory);
     if (selected && selected.available_count < MIN_CATEGORY_ITEMS) {
@@ -245,12 +288,17 @@ export default function App() {
     }
     setBusy((prev) => ({ ...prev, start: true }));
     try {
-      const created = await startGame(playerName, selectedCategory);
-      const onboardingPayload = await getOnboarding(created.id);
+      const created = await startGame(playerName, selectedCategory, freshStart);
       setGame(created);
-      setOnboarding(onboardingPayload);
       setSelectedIds([]);
-      setView(VIEW.ONBOARDING);
+      if (created.status === VIEW.ONBOARDING) {
+        const onboardingPayload = await getOnboarding(created.id);
+        setOnboarding(onboardingPayload);
+        setView(VIEW.ONBOARDING);
+      } else {
+        setOnboarding(null);
+        await loadNextRound(created.id);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -335,21 +383,26 @@ export default function App() {
     }
   }
 
+  async function handlePlayAgain() {
+    if (!playerName.trim()) {
+      return;
+    }
+    await handleStart(false);
+  }
+
   return (
     <main className="app-root">
-      <button
-        type="button"
-        className="theme-toggle"
-        onClick={toggleTheme}
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
-      </button>
-
-      {isAuthenticated && view !== VIEW.WELCOME && (
-        <header className="app-header">
-          <div className="header-content">
-            <img src={activeLogo} alt="Recommendle" className="app-logo" />
+      <div className="top-right-controls">
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={toggleTheme}
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        >
+          {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
+        </button>
+        {isAuthenticated && (
+          <div className="account-floating">
             <AccountMenu
               displayName={displayName}
               username={username}
@@ -357,8 +410,8 @@ export default function App() {
               loading={authLoading}
             />
           </div>
-        </header>
-      )}
+        )}
+      </div>
 
       {!isAuthenticated && view === VIEW.WELCOME && (
         <header className="app-header welcome-header">
@@ -377,20 +430,6 @@ export default function App() {
 
       {isAuthenticated && (
         <>
-          {view !== VIEW.WELCOME && (
-            <header className="app-header">
-              <div className="header-content">
-                <img src={activeLogo} alt="Recommendle" className="app-logo" />
-                <AccountMenu
-                  displayName={displayName}
-                  username={username}
-                  onLogout={handleLogout}
-                  loading={authLoading}
-                />
-              </div>
-            </header>
-          )}
-
           {error && (
             <div className="error-banner">
               <span>{error}</span>
@@ -409,12 +448,16 @@ export default function App() {
           {view === VIEW.WELCOME && (
             <WelcomeScreen
               logoSrc={activeLogo}
+              showLogo={true}
               playerName={playerName}
               setPlayerName={setPlayerName}
               categories={categories}
               selectedCategory={selectedCategory}
               setSelectedCategory={setSelectedCategory}
-              onStart={handleStart}
+              onStart={() => handleStart(false)}
+              onStartFresh={() => handleStart(true)}
+              resumable={resumableGame}
+              resumeLoading={resumeLoading}
               loading={busy.start}
               categoriesLoading={categoriesLoading}
               categoryLoadError={categoryLoadError}
@@ -487,7 +530,8 @@ export default function App() {
               category={activeCategory}
               gameId={game?.id}
               leaderboard={leaderboard}
-              onRestart={resetAll}
+              onRestart={handlePlayAgain}
+              onHome={resetAll}
               onViewPlayer={(name) => setViewingPlayer(name)}
             />
           )}

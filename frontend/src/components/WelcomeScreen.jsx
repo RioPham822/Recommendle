@@ -1,12 +1,16 @@
 export default function WelcomeScreen({
   logoSrc,
+  showLogo = true,
   playerName,
   setPlayerName,
   categories = [],
   selectedCategory,
   setSelectedCategory,
   onStart,
+  onStartFresh,
   loading,
+  resumable = null,
+  resumeLoading = false,
   categoriesLoading = false,
   categoryLoadError = '',
   categoryProgress = 0,
@@ -24,7 +28,7 @@ export default function WelcomeScreen({
   return (
     <section className="screen shell welcome-screen">
       <div className="hero">
-        <img src={logoSrc} alt="Recommendle" className="app-logo" style={{ marginBottom: '0.75rem' }} />
+        {showLogo && <img src={logoSrc} alt="Recommendle" className="app-logo" style={{ marginBottom: '0.75rem' }} />}
         <h1>Can you out-pick an AI model?</h1>
         <p className="subtitle">
           Build a taste profile, then go head-to-head for 5 rounds. Pick your favorite before the AI reveals its prediction.
@@ -99,9 +103,23 @@ export default function WelcomeScreen({
           </div>
         )}
 
-        <button type="button" onClick={onStart} disabled={loading || categoriesLoading || !playerName.trim()}>
-          {loading ? 'Starting...' : 'Play'}
+        <button type="button" onClick={onStart} disabled={loading || categoriesLoading || resumeLoading || !playerName.trim()}>
+          {loading ? 'Starting...' : resumable?.exists ? 'Continue' : 'Play'}
         </button>
+        <button
+          type="button"
+          className="secondary-btn"
+          onClick={onStartFresh}
+          disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !resumable?.can_start_fresh}
+        >
+          Start Fresh
+        </button>
+        {resumable?.exists && (
+          <p className="dataset-loading-copy">
+            Resume available for this category: round {Math.min((resumable.current_round || 0) + 1, resumable.total_rounds || 5)}
+            {' '}of {resumable.total_rounds || 5}.
+          </p>
+        )}
       </div>
 
       {leaderboard && leaderboard.length > 0 && (

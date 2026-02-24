@@ -66,12 +66,35 @@ export default function RoundResultPanel({ result, categoryCopy = {}, onNext, lo
         </h4>
         <ul>
           {ai_explanation.top_candidates.map((c, i) => (
-            <li key={c.id} className={result.human_pick.id === c.id ? 'matched' : ''}>
+            <li key={c.id} className={`candidate-item ${result.human_pick.id === c.id ? 'matched' : ''}`}>
               <span>
                 <strong style={{ marginRight: '0.4rem', color: 'var(--ink-faint)' }}>#{i + 1}</strong>
                 {c.title}
               </span>
               <strong>{c.score.toFixed(2)}</strong>
+              <div className="candidate-preview">
+                <div className="candidate-preview-media">
+                  {c.image_url ? (
+                    <img src={c.image_url} alt={c.title} loading="lazy" />
+                  ) : (
+                    <div className="candidate-preview-noimg">No image</div>
+                  )}
+                </div>
+                <div className="candidate-preview-body">
+                  <p className="candidate-preview-title">{c.title}</p>
+                  <p className="candidate-preview-subtitle">{c.subtitle || c.vendor || 'Unknown'}</p>
+                  {Object.entries(c.attributes || {}).slice(0, 4).map(([key, value]) => (
+                    <p key={key} className="candidate-preview-attr">
+                      <strong>{key.replace(/_/g, ' ')}</strong>: {Array.isArray(value) ? value.slice(0, 2).join(', ') : String(value)}
+                    </p>
+                  ))}
+                  <div className="tag-list">
+                    {[...(c.meta_badges || []), ...((c.tags || []).slice(0, 3))].map((token) => (
+                      <span key={token}>{token}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </li>
           ))}
         </ul>

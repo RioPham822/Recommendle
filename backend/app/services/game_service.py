@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
@@ -17,7 +17,7 @@ from ..category_profiles import (
     normalize_category,
     supported_categories,
 )
-from ..db import GameRecord, GameRoundRecord, ProductRecord, record_to_dict
+from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, record_to_dict
 from ..ml.prefix_cf import PrefixCFModel
 from ..services.recommender import recommender
 from .game_insights import GameInsightsMixin
@@ -453,6 +453,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         player_name: str,
         category: str = "fountain_pens",
         total_rounds: int = 5,
+        fresh_start: bool = False,
     ) -> dict[str, Any]:
         """Create and persist a new game session for a player/category."""
         await self._ensure_indexes(db)
@@ -462,6 +463,89 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         if not clean_name:
             raise ValueError("Player name is required")
         now = datetime.utcnow()
+        existing_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                )
+            )
+            .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
+            .limit(1)
+        )
+        if existing_game is not None:
+            if fresh_start:
+                await db.execute(delete(GameRoundRecord).where(GameRoundRecord.game_id == existing_game.id))
+                await db.execute(delete(PrefixRatingRecord).where(PrefixRatingRecord.session_id == existing_game.id))
+                existing_game.status = "onboarding"
+                existing_game.current_round = 0
+                existing_game.total_rounds = total_rounds
+                existing_game.human_score = 0
+                existing_game.ai_score = 0
+                existing_game.model_state = model.init_state()
+                existing_game.onboarding_pool_ids = []
+                existing_game.onboarding_selected_ids = []
+                existing_game.onboarding_rating = None
+                existing_game.updated_at = now
+                await db.commit()
+                await db.refresh(existing_game)
+                return {
+                    "id": existing_game.id,
+                    "player_name": existing_game.player_name,
+                    "category": normalized_category,
+                    "status": existing_game.status,
+                    "total_rounds": int(existing_game.total_rounds or total_rounds),
+                    "human_score": int(existing_game.human_score or 0),
+                    "ai_score": int(existing_game.ai_score or 0),
+                    "created_at": existing_game.created_at,
+                    "resumed": False,
+                }
+
+            if existing_game.status in {"onboarding", "ready", "playing"}:
+                return {
+                    "id": existing_game.id,
+                    "player_name": existing_game.player_name,
+                    "category": normalized_category,
+                    "status": existing_game.status,
+                    "total_rounds": int(existing_game.total_rounds or total_rounds),
+                    "human_score": int(existing_game.human_score or 0),
+                    "ai_score": int(existing_game.ai_score or 0),
+                    "created_at": existing_game.created_at,
+                    "resumed": True,
+                }
+
+            can_carry_profile = bool(
+                isinstance(existing_game.model_state, dict) and len(existing_game.onboarding_selected_ids or []) == 10
+            )
+            if can_carry_profile:
+                existing_game.status = "ready"
+                existing_game.total_rounds = int(existing_game.total_rounds or 0) + int(total_rounds)
+            else:
+                existing_game.status = "onboarding"
+                existing_game.current_round = 0
+                existing_game.total_rounds = total_rounds
+                existing_game.human_score = 0
+                existing_game.ai_score = 0
+                existing_game.model_state = model.init_state()
+                existing_game.onboarding_pool_ids = []
+                existing_game.onboarding_selected_ids = []
+                existing_game.onboarding_rating = None
+            existing_game.updated_at = now
+            await db.commit()
+            await db.refresh(existing_game)
+            return {
+                "id": existing_game.id,
+                "player_name": existing_game.player_name,
+                "category": normalized_category,
+                "status": existing_game.status,
+                "total_rounds": int(existing_game.total_rounds or total_rounds),
+                "human_score": int(existing_game.human_score or 0),
+                "ai_score": int(existing_game.ai_score or 0),
+                "created_at": existing_game.created_at,
+                "resumed": True,
+            }
+
         game = GameRecord(
             schema_version=2,
             player_name=clean_name,
@@ -490,6 +574,71 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             "human_score": game.human_score,
             "ai_score": game.ai_score,
             "created_at": game.created_at,
+            "resumed": False,
+        }
+
+    async def get_resume_state(
+        self,
+        db: AsyncSession,
+        player_name: str,
+        category: str = "fountain_pens",
+    ) -> dict[str, Any]:
+        """Return whether a resumable game exists for player+category."""
+        normalized_category = normalize_category(category)
+        clean_name = player_name.strip()
+        if not clean_name:
+            return {
+                "exists": False,
+                "can_start_fresh": False,
+                "game_id": None,
+                "player_name": None,
+                "category": normalized_category,
+                "status": None,
+                "current_round": None,
+                "total_rounds": None,
+            }
+        any_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                )
+            )
+            .limit(1)
+        )
+        active_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                    GameRecord.status.in_(["onboarding", "ready", "playing"]),
+                )
+            )
+            .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
+            .limit(1)
+        )
+        if active_game is None:
+            return {
+                "exists": False,
+                "can_start_fresh": any_game is not None,
+                "game_id": None,
+                "player_name": clean_name,
+                "category": normalized_category,
+                "status": None,
+                "current_round": None,
+                "total_rounds": None,
+            }
+        return {
+            "exists": True,
+            "can_start_fresh": True,
+            "game_id": active_game.id,
+            "player_name": active_game.player_name,
+            "category": normalized_category,
+            "status": active_game.status,
+            "current_round": int(active_game.current_round or 0),
+            "total_rounds": int(active_game.total_rounds or 0),
         }
 
 
