@@ -26,10 +26,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://decidio:decidio_pass@postgres:5432/decidio
       DB_POOL_SIZE: 10
       DB_MAX_OVERFLOW: 20
+    volumes:
+      - ./backend/data:/app/data
     ports:
       - "8015:8015"
 

@@ -37,8 +37,18 @@ async def summary() -> None:
     await init_db()
     db_gen = get_db()
     db = await anext(db_gen)
+    product_total = int(await db.scalar(select(func.count()).select_from(ProductRecord)) or 0)
+    pen_count = int(
+        await db.scalar(select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "fountain_pens"))
+        or 0
+    )
+    movie_count = int(
+        await db.scalar(select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "movies")) or 0
+    )
     counts = {
-        "products": int(await db.scalar(select(func.count()).select_from(ProductRecord)) or 0),
+        "products_total": product_total,
+        "products_fountain_pens": pen_count,
+        "products_movies": movie_count,
         "users": int(await db.scalar(select(func.count()).select_from(UserRecord)) or 0),
         "games": int(await db.scalar(select(func.count()).select_from(GameRecord)) or 0),
         "game_rounds": int(await db.scalar(select(func.count()).select_from(GameRoundRecord)) or 0),
@@ -48,7 +58,7 @@ async def summary() -> None:
     for name, count in counts.items():
         total += count
         print(f"{name}: {count}")
-    print(f"TOTAL: {total}")
+    print(f"TOTAL: {total-product_total}")
     await db_gen.aclose()
 
 

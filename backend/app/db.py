@@ -208,6 +208,13 @@ async def init_db() -> None:
         )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_category ON products(category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_source_id ON products((data->>'source_id'))"))
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_products_category_source_id "
+                "ON products(category, (data->>'source_id')) "
+                "WHERE (data ? 'source_id') AND (COALESCE(data->>'source_id', '') <> '')"
+            )
+        )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_title ON products((data->>'title'))"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_vendor ON products((data->>'vendor'))"))
         await conn.execute(

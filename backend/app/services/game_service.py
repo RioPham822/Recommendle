@@ -270,11 +270,31 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         rng = self._rng_for(game_id, 0, "onboarding")
         products = list(all_products)
         rng.shuffle(products)
-        numeric_field = "price_min" if category == "fountain_pens" else "popularity"
+        profile = get_category_profile(category)
+        values_by_field: dict[str, list[float]] = {}
+        for field in profile.numeric_fields:
+            values: list[float] = []
+            for p in products:
+                raw = p.get(field)
+                try:
+                    if raw is not None:
+                        values.append(float(raw))
+                except (TypeError, ValueError):
+                    continue
+            if len(values) >= 10:
+                values_by_field[field] = values
+
+        if not values_by_field:
+            # If a category has no usable numeric signal, keep deterministic sampling
+            # and return a shuffled subset rather than failing the game start flow.
+            return [str(p["_id"]) for p in products[:50]]
+
+        # Pick the numeric axis with highest spread so low/mid/high buckets are meaningful.
+        numeric_field = max(
+            values_by_field.keys(),
+            key=lambda field: max(values_by_field[field]) - min(values_by_field[field]),
+        )
         values = [float(p.get(numeric_field) or 0.0) for p in products]
-        if max(values, default=0.0) == 0.0 and category == "movies":
-            numeric_field = "release_year"
-            values = [float(p.get(numeric_field) or 0.0) for p in products]
         sorted_values = sorted(values)
         q1 = sorted_values[len(sorted_values) // 3]
         q2 = sorted_values[(2 * len(sorted_values)) // 3]
@@ -300,6 +320,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             vendor_keys = list(by_vendor.keys())
             rng.shuffle(vendor_keys)
             picks: list[dict[str, Any]] = []
+            # Cycle vendor-by-vendor so one studio/brand does not dominate onboarding.
             while len(picks) < target and vendor_keys:
                 next_vendor_keys: list[str] = []
                 for vendor in vendor_keys:
@@ -389,6 +410,8 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 if len(selected_ids) >= target:
                     return
 
+        # Mix likely picks, borderline picks, and harder/distant picks to avoid
+        # overly easy rounds while still keeping AI-scorable candidates.
         likely = scored[:20]
         add_from_pool(likely, 6)
         near_boundary = scored[20:120] or scored[6:120]

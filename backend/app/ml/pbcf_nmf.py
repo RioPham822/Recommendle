@@ -36,12 +36,12 @@ class PBCFEngine:
         self.H: np.ndarray | None = None
 
     async def _build_prefix_from_game_round(self, game_round: dict[str, Any]) -> str | None:
-        """Build stable prefix key from stored clue product IDs."""
-        clue_ids = game_round.get("clue_pen_ids")
-        if not clue_ids or not isinstance(clue_ids, list):
+        """Build stable prefix key from current round candidate product IDs."""
+        candidate_ids = game_round.get("candidate_ids")
+        if not candidate_ids or not isinstance(candidate_ids, list):
             return None
-        sorted_clues = sorted(str(cid) for cid in clue_ids)
-        return "-".join(sorted_clues)
+        sorted_candidates = sorted(str(cid) for cid in candidate_ids)
+        return "-".join(sorted_candidates)
 
     async def build_matrix(self, db: AsyncSession) -> PBCFArtifacts | None:
         """Build sparse rating matrix from completed historical rounds."""
@@ -62,19 +62,18 @@ class PBCFEngine:
         latest: dict[tuple[str, str], tuple[datetime, int]] = {}
         for round_row in rounds:
             round_data = {
-                "clue_pen_ids": getattr(round_row, "clue_pen_ids", None),
-                "mystery_user_id": getattr(round_row, "mystery_user_id", None),
-                "human_correct": getattr(round_row, "human_correct", False),
+                "candidate_ids": getattr(round_row, "candidate_ids", None),
+                "user_id": getattr(round_row, "game_id", None),
                 "ai_correct": round_row.ai_correct,
                 "created_at": round_row.created_at,
             }
             key = await self._build_prefix_from_game_round(round_data)
             if not key:
                 continue
-            user_id = round_data.get("mystery_user_id")
+            user_id = round_data.get("user_id")
             if not user_id:
                 continue
-            is_correct = bool(round_data.get("human_correct", False) or round_data.get("ai_correct", False))
+            is_correct = bool(round_data.get("ai_correct", False))
             rating_value = 5 if is_correct else 1
             stamp = round_data.get("created_at", datetime.utcnow())
             prev = latest.get((key, user_id))

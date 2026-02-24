@@ -15,7 +15,6 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -100,7 +99,6 @@ async def load_products(replace: bool = True) -> None:
                 ProductRecord(
                     category="fountain_pens",
                     data=doc,
-                    created_at=datetime.now(timezone.utc),
                 )
             )
         upserts += 1

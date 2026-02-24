@@ -219,7 +219,6 @@ async def ingest_movies(
                         ProductRecord(
                             category="movies",
                             data=doc,
-                            created_at=datetime.now(timezone.utc),
                         )
                     )
 
