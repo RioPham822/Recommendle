@@ -4,6 +4,7 @@ Lightweight local database utility for the Postgres-backed store.
 Usage:
     python test.py summary
     python test.py list-collections
+    python test.py clear-games
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from app.db import (
     get_db,
     init_db,
 )
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 
 async def list_collections() -> None:
@@ -62,11 +63,26 @@ async def summary() -> None:
     await db_gen.aclose()
 
 
+async def clear_games() -> None:
+    """Delete all game-related rows (games, rounds, prefix ratings)."""
+    await init_db()
+    db_gen = get_db()
+    db = await anext(db_gen)
+    deleted_rounds = await db.execute(delete(GameRoundRecord))
+    deleted_games = await db.execute(delete(GameRecord))
+    deleted_prefix = await db.execute(delete(PrefixRatingRecord))
+    await db.commit()
+    print(f"deleted game_rounds: {int(deleted_rounds.rowcount or 0)}")
+    print(f"deleted games: {int(deleted_games.rowcount or 0)}")
+    print(f"deleted prefix_ratings: {int(deleted_prefix.rowcount or 0)}")
+    await db_gen.aclose()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Postgres local DB utility")
     parser.add_argument(
         "command",
-        choices=["summary", "list-collections"],
+        choices=["summary", "list-collections", "clear-games"],
         help="Operation to run",
     )
     return parser.parse_args()
@@ -76,6 +92,8 @@ def main() -> None:
     args = parse_args()
     if args.command == "summary":
         asyncio.run(summary())
+    elif args.command == "clear-games":
+        asyncio.run(clear_games())
     else:
         asyncio.run(list_collections())
 
