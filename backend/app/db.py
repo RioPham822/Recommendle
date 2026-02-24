@@ -207,9 +207,7 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_games_category_player_created ON games(category, player_name, created_at DESC)"
             )
         )
-        await conn.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_game_player_category ON games(player_name, category)")
-        )
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_game_player_category ON games(player_name, category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_category ON products(category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_source_id ON products((data->>'source_id'))"))
         await conn.execute(

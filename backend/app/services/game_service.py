@@ -17,7 +17,13 @@ from ..category_profiles import (
     normalize_category,
     supported_categories,
 )
-from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, record_to_dict
+from ..db import (
+    GameRecord,
+    GameRoundRecord,
+    PrefixRatingRecord,
+    ProductRecord,
+    record_to_dict,
+)
 from ..ml.prefix_cf import PrefixCFModel
 from ..services.recommender import recommender
 from .game_insights import GameInsightsMixin
