@@ -1,4 +1,4 @@
-﻿# Development Guide
+# Development Guide
 
 Technical reference for contributors working on Recommendle.
 For clone-to-run setup, use the root `README.md`.

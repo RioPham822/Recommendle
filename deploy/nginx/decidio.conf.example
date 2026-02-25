@@ -1,4 +1,4 @@
-﻿server {
+server {
     listen 80;
     server_name your-backend-domain;
     return 301 https://$host$request_uri;

@@ -1,4 +1,4 @@
-﻿# Recommendle Requirements Specification
+# Recommendle Requirements Specification
 
 ## 1. Purpose
 This document defines the project requirements for Recommendle (Decidio Preference Modeling), based on:

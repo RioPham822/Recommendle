@@ -1,4 +1,4 @@
-﻿"""HTTP routes for game lifecycle, rounds, leaderboard, and summaries."""
+"""HTTP routes for game lifecycle, rounds, leaderboard, and summaries."""
 
 from __future__ import annotations
 

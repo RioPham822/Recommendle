@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 
 BASE_URL="http://localhost:8015/api/game"
 

@@ -1,4 +1,4 @@
-﻿# MongoDB Setup (Deprecated)
+# MongoDB Setup (Deprecated)
 
 This project no longer uses MongoDB.
 

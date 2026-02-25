@@ -1,4 +1,4 @@
-﻿# Recommendle
+# Recommendle
 
 Recommendle is an interactive web game where a human player competes against an AI recommendation model.  
 It is a CSC 492 Senior Design project focused on **sequential preference modeling**: learning user taste from a sequence of choices instead of one-off ratings.

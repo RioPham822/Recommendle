@@ -1,4 +1,4 @@
-﻿# Features Guide
+# Features Guide
 
 This file summarizes currently implemented features and how to use them.
 

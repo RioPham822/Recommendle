@@ -1,1 +1,1 @@
-﻿"""Decidio backend application package."""
+"""Decidio backend application package."""

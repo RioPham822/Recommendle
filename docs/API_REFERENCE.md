@@ -1,4 +1,4 @@
-﻿# API Reference
+# API Reference
 
 Current backend API reference for this repository.
 

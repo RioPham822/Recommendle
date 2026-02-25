@@ -1,4 +1,4 @@
-﻿# Authentication Frontend Implementation
+# Authentication Frontend Implementation
 
 ## Overview
 

@@ -1,4 +1,4 @@
-﻿# Nginx Reverse Proxy Setup (Decidio Backend)
+# Nginx Reverse Proxy Setup (Decidio Backend)
 
 This guide explains how to expose the Docker backend (`127.0.0.1:8015`) as a public HTTPS API URL that your hosted frontend can call.
 
