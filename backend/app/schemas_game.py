@@ -22,6 +22,8 @@ class ProductCard(BaseModel):
     meta_badges: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     image_url: str | None = None
+    description: str | None = None
+    url: str | None = None
 
 
 class MetricsOut(BaseModel):
@@ -73,6 +75,7 @@ class OnboardingOut(BaseModel):
     category: str = "fountain_pens"
     pool_size: int
     category_copy: dict[str, str] = Field(default_factory=dict)
+    display_schema: dict[str, Any] = Field(default_factory=dict)
     products: list[ProductCard]
 
 
@@ -97,7 +100,9 @@ class RoundStartOut(BaseModel):
 
     round_number: int
     category: str = "fountain_pens"
+    round_mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
+    display_schema: dict[str, Any] = Field(default_factory=dict)
     candidates: list[ProductCard]
     pre_round_metrics: MetricsOut
 
@@ -131,6 +136,7 @@ class RoundResultOut(BaseModel):
 
     round_number: int
     category: str = "fountain_pens"
+    round_mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
     human_pick: ProductCard
     ai_pick: ScoredProductCard

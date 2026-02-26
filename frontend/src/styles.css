@@ -536,6 +536,12 @@ input:focus {
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
 }
 
+.pool-grid.candidates.duel-candidates {
+  grid-template-columns: repeat(2, minmax(260px, 340px));
+  justify-content: center;
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
 /* ── Product Cards ──────────────────────────────────── */
 
 .product-card {
@@ -677,6 +683,74 @@ input:focus {
 .feature-list strong {
   color: var(--ink);
   text-transform: capitalize;
+}
+
+.card-feature-list p {
+  font-size: 0.72rem;
+}
+
+.card-hover-detail {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .product-card .card-hover-detail {
+    position: absolute;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 0.5rem;
+    box-shadow: var(--shadow-md);
+    z-index: 3;
+    max-height: 160px;
+    overflow: auto;
+  }
+
+  .product-card .card-hover-detail p {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: var(--ink-soft);
+  }
+
+  .product-card .card-hover-detail p + p {
+    margin-top: 0.3rem;
+  }
+
+  .product-card:hover .card-hover-detail,
+  .product-card:focus-visible .card-hover-detail {
+    display: block;
+  }
+
+  .pool-grid.candidates.duel-candidates .product-card {
+    overflow: visible;
+  }
+
+  .pool-grid.candidates.duel-candidates .product-card .card-hover-detail {
+    position: fixed;
+    top: 6.5rem;
+    bottom: 1rem;
+    width: min(44vw, 540px);
+    max-height: none;
+    border: 2px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    padding: 0.95rem;
+    z-index: 14;
+    overflow: auto;
+  }
+
+  .pool-grid.candidates.duel-candidates .product-card.hover-panel-left .card-hover-detail {
+    left: 1rem;
+    right: auto;
+  }
+
+  .pool-grid.candidates.duel-candidates .product-card.hover-panel-right .card-hover-detail {
+    right: 1rem;
+    left: auto;
+  }
 }
 
 /* ── Round Actions ──────────────────────────────────── */
@@ -1279,6 +1353,10 @@ input:focus {
 
   .pool-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+
+  .pool-grid.candidates.duel-candidates {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .stats-row {

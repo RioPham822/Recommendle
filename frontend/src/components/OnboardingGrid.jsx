@@ -7,6 +7,7 @@ export default function OnboardingGrid({
   onToggle,
   onOpenRating,
   mode,
+  displaySchema = {},
   categoryCopy = {},
 }) {
   const plural = categoryCopy.item_plural || 'products';
@@ -36,6 +37,7 @@ export default function OnboardingGrid({
             key={product.id}
             product={product}
             mode={mode}
+            displaySchema={displaySchema}
             selected={selectedIds.includes(product.id)}
             onClick={() => onToggle(product.id)}
           />

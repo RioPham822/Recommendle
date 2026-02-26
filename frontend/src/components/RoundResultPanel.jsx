@@ -29,11 +29,16 @@ export default function RoundResultPanel({ result, categoryCopy = {}, onNext, lo
 
   const { ai_correct, ai_exact, ai_rank_of_pick, ai_explanation, post_round_metrics } = result;
   const singular = categoryCopy.item_singular || 'item';
+  const isDuel = result.round_mode === 'duel';
 
   const outcomeClass = ai_correct ? 'outcome-ai' : 'outcome-human';
-  const outcomeText = ai_correct
-    ? (ai_exact ? 'AI Exact Match!' : `AI Top-3 Hit (Rank #${ai_rank_of_pick})`)
-    : `AI Missed - Your pick was #${ai_rank_of_pick}`;
+  const outcomeText = isDuel
+    ? (ai_correct ? 'AI Won This Duel' : 'You Won This Duel')
+    : (
+      ai_correct
+        ? (ai_exact ? 'AI Exact Match!' : `AI Top-3 Hit (Rank #${ai_rank_of_pick})`)
+        : `AI Missed - Your pick was #${ai_rank_of_pick}`
+    );
 
   return (
     <section className="screen shell">
@@ -62,7 +67,7 @@ export default function RoundResultPanel({ result, categoryCopy = {}, onNext, lo
         <p>{ai_explanation.reason}</p>
 
         <h4 style={{ marginTop: '1rem', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink-faint)' }}>
-          AI's Top 5 Candidates
+          {isDuel ? 'Duel Candidate Scores' : "AI's Top 5 Candidates"}
         </h4>
         <ul>
           {ai_explanation.top_candidates.map((c, i) => (

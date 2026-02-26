@@ -10,6 +10,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
+    category_display_schema,
     category_copy,
     get_category_profile,
 )
@@ -63,6 +64,7 @@ class GamePlayMixin:
             "game_id": game_id,
             "category": category,
             "category_copy": category_copy(category),
+            "display_schema": category_display_schema(category),
             "pool_size": len(products),
             "products": [self._product_card(p, category) for p in products],
         }
@@ -144,6 +146,7 @@ class GamePlayMixin:
             raise ValueError("Game is complete")
 
         round_number = game["current_round"] + 1
+        round_target = self._round_candidate_target(category)
         existing = await db.scalar(
             select(GameRoundRecord).where(
                 and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.round_number == round_number)
@@ -158,7 +161,9 @@ class GamePlayMixin:
             return {
                 "round_number": round_number,
                 "category": category,
+                "round_mode": get_category_profile(category).round_mode,
                 "category_copy": category_copy(category),
+                "display_schema": category_display_schema(category),
                 "candidates": [self._product_card(p, category) for p in products],
                 "pre_round_metrics": existing.pre_metrics or {"coherence_score": 0.0, "predicted_prefix_rating": 3.0},
             }
@@ -175,11 +180,11 @@ class GamePlayMixin:
         used = set(selected_ids)
         all_products = await self._all_products_for_scoring(db, category)
         candidates_source = [p for p in all_products if str(p["_id"]) not in used]
-        if len(candidates_source) < 10:
+        if len(candidates_source) < round_target:
             raise ValueError("Not enough products left to generate a round")
 
         scored = self._rank_candidates(model, state, candidates_source)
-        candidate_ids = self._build_round_candidates(game_id, round_number, scored)
+        candidate_ids = self._build_round_candidates(game_id, round_number, category, scored)
         candidate_products = await self._get_products_by_ids(
             db,
             candidate_ids,
@@ -214,7 +219,9 @@ class GamePlayMixin:
         return {
             "round_number": round_number,
             "category": category,
+            "round_mode": get_category_profile(category).round_mode,
             "category_copy": category_copy(category),
+            "display_schema": category_display_schema(category),
             "candidates": [self._product_card(p, category) for p in candidate_products],
             "pre_round_metrics": pre_metrics,
         }
@@ -231,6 +238,7 @@ class GamePlayMixin:
         model = await self._ensure_model(db)
         category = self._game_category(game)
         profile = get_category_profile(category)
+        duel_mode = profile.round_mode == "duel"
 
         if game["current_round"] >= game["total_rounds"]:
             raise ValueError("Game is already complete")
@@ -291,8 +299,8 @@ class GamePlayMixin:
         ai_score, ai_pick_product = scored[0]
         ai_pick_id = str(ai_pick_product["_id"])
         ai_top3_ids = [str(p["_id"]) for _, p in scored[:3]]
-        ai_correct = product_id in ai_top3_ids
         ai_exact = ai_pick_id == product_id
+        ai_correct = ai_exact if duel_mode else (product_id in ai_top3_ids)
         human_points = 0 if ai_correct else 10
         ai_points = 10 if ai_correct else 0
         ai_rank_of_pick = next((i + 1 for i, (_, p) in enumerate(scored) if str(p["_id"]) == product_id), len(scored))
@@ -354,10 +362,16 @@ class GamePlayMixin:
 
         if ai_correct:
             if ai_exact:
-                reason = (
-                    f"The AI predicted your exact {profile.item_singular}! "
-                    f"It ranked this title #1 out of {len(candidate_products)} candidates based on your preference profile."
-                )
+                if duel_mode:
+                    reason = (
+                        f"The AI won this duel and matched your exact {profile.item_singular} choice. "
+                        f"It predicted your side correctly from the two options shown."
+                    )
+                else:
+                    reason = (
+                        f"The AI predicted your exact {profile.item_singular}! "
+                        f"It ranked this title #1 out of {len(candidate_products)} candidates based on your preference profile."
+                    )
             else:
                 match_rank = ai_top3_ids.index(product_id) + 1
                 reason = (
@@ -402,6 +416,7 @@ class GamePlayMixin:
         return {
             "round_number": round_number,
             "category": category,
+            "round_mode": profile.round_mode,
             "category_copy": category_copy(category),
             "human_pick": self._product_card(human_pick_product, category),
             "ai_pick": {**self._product_card(ai_pick_product, category), "score": float(ai_score)},

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
     category_copy,
+    clean_display_tags,
     get_category_profile,
     normalize_category,
     supported_categories,
@@ -94,10 +95,15 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         fields = {"category", *profile.categorical_fields, *profile.multi_fields, *profile.numeric_fields}
         return {field: 1 for field in fields}
 
+    def _round_candidate_target(self, category: str) -> int:
+        """Return number of candidates shown each round for this category."""
+        profile = get_category_profile(category)
+        return 2 if profile.round_mode == "duel" else 10
+
     def _card_projection(self, category: str) -> dict[str, int]:
         """Build projection for card rendering (features + title/image)."""
         projection = self._feature_projection(category)
-        for field in ("title", "images"):
+        for field in ("title", "images", "description", "url"):
             projection[field] = 1
         return projection
 
@@ -145,8 +151,10 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             "price_max": product.get("price_max"),
             "attributes": attributes,
             "meta_badges": badges,
-            "tags": product.get("tags", [])[:8],
+            "tags": clean_display_tags(resolved_category, product.get("tags"), limit=8),
             "image_url": image_url,
+            "description": product.get("description"),
+            "url": product.get("url"),
         }
 
     async def _get_game(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
@@ -393,11 +401,17 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         self,
         game_id: str,
         round_number: int,
+        category: str,
         scored: list[tuple[float, dict[str, Any]]],
     ) -> list[str]:
-        """Build a balanced 10-item candidate set from ranked products."""
+        """Build a category-aware candidate set for the next round."""
         rng = self._rng_for(game_id, round_number, "round_candidates")
-        if len(scored) <= 10:
+        target = self._round_candidate_target(category)
+
+        if target == 2:
+            return self._build_round_duel_candidates(rng, scored)
+
+        if len(scored) <= target:
             ids = [str(p["_id"]) for _, p in scored]
             rng.shuffle(ids)
             return ids
@@ -429,9 +443,37 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             diverse = tail
         add_from_pool(diverse, 10)
         add_from_pool(scored, 10)
-        selected_ids = selected_ids[:10]
+        selected_ids = selected_ids[:target]
         rng.shuffle(selected_ids)
         return selected_ids
+
+    @staticmethod
+    def _build_round_duel_candidates(
+        rng: random.Random,
+        scored: list[tuple[float, dict[str, Any]]],
+    ) -> list[str]:
+        """Build a two-item duel from one likely and one close-rank challenger."""
+        if len(scored) <= 2:
+            ids = [str(p["_id"]) for _, p in scored]
+            rng.shuffle(ids)
+            return ids
+
+        top_pool = scored[: min(12, len(scored))]
+        _, anchor = rng.choice(top_pool)
+        anchor_id = str(anchor["_id"])
+
+        ranked_ids = [str(p["_id"]) for _, p in scored]
+        anchor_rank = ranked_ids.index(anchor_id)
+        near_start = max(0, anchor_rank - 8)
+        near_end = min(len(scored), anchor_rank + 9)
+        near_pool = [pair for pair in scored[near_start:near_end] if str(pair[1]["_id"]) != anchor_id]
+        if not near_pool:
+            near_pool = [pair for pair in scored if str(pair[1]["_id"]) != anchor_id]
+
+        _, challenger = rng.choice(near_pool)
+        ids = [anchor_id, str(challenger["_id"])]
+        rng.shuffle(ids)
+        return ids
 
     async def get_categories(self, db: AsyncSession) -> list[dict[str, Any]]:
         """Return configured categories with currently available product counts."""

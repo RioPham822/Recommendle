@@ -22,10 +22,14 @@ class CategoryProfile:
     top_recommendations_label: str
     hidden_gems_label: str
     hidden_gems_subtitle: str
+    round_mode: str
     redundant_tokens: tuple[str, ...]
     categorical_fields: tuple[str, ...]
     multi_fields: tuple[str, ...]
     numeric_fields: tuple[str, ...]
+    card_display_fields: tuple[str, ...]
+    detail_display_fields: tuple[str, ...]
+    hidden_tag_tokens: tuple[str, ...]
 
 
 _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
@@ -40,6 +44,7 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         top_recommendations_label="AI's Top 5 Picks for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
         hidden_gems_subtitle="Pens You Didn't Know You'd Love",
+        round_mode="classic",
         redundant_tokens=(
             "fountain pens",
             "fountain pen",
@@ -56,6 +61,17 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         categorical_fields=("vendor", "product_type"),
         multi_fields=("tags", "options"),
         numeric_fields=("price_min", "price_max"),
+        card_display_fields=("vendor", "price", "nib_size", "tags"),
+        detail_display_fields=("description", "nib_sizes", "tags", "url"),
+        hidden_tag_tokens=(
+            "products",
+            "pens",
+            "hideoos",
+            "bis-hidden",
+            "gpc-oversize",
+            "yafa-pen",
+            "pens-lifetime",
+        ),
     ),
     "movies": CategoryProfile(
         id="movies",
@@ -68,6 +84,7 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         top_recommendations_label="AI's Top 5 Movies for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
         hidden_gems_subtitle="Movies You Didn't Know You'd Love",
+        round_mode="duel",
         redundant_tokens=("movie", "movies", "film", "films"),
         categorical_fields=(
             "vendor",
@@ -79,6 +96,18 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         ),
         multi_fields=("genres", "keywords", "production_companies", "directors"),
         numeric_fields=("release_year", "runtime_minutes", "vote_average", "popularity"),
+        card_display_fields=("release_year", "genres", "runtime_minutes", "vote_average"),
+        detail_display_fields=(
+            "description",
+            "directors",
+            "certification",
+            "original_language",
+            "primary_country",
+            "production_companies",
+            "keywords",
+            "url",
+        ),
+        hidden_tag_tokens=("movie", "movies", "film", "films"),
     ),
 }
 
@@ -117,6 +146,32 @@ def category_copy(category: str | None) -> dict[str, str]:
         "top_recommendations_label": profile.top_recommendations_label,
         "hidden_gems_label": profile.hidden_gems_label,
         "hidden_gems_subtitle": profile.hidden_gems_subtitle,
+        "round_mode": profile.round_mode,
+    }
+
+
+def category_display_schema(category: str | None) -> dict[str, Any]:
+    """Return per-category field schema used by frontend cards and detail popovers."""
+    profile = get_category_profile(category)
+    return {
+        "card_fields": [
+            {
+                "key": field,
+                "label": profile.vendor_label if field == "vendor" else _display_field_label(field),
+                "type": _display_field_type(field),
+            }
+            for field in profile.card_display_fields
+        ],
+        "detail_fields": [
+            {
+                "key": field,
+                "label": profile.vendor_label if field == "vendor" else _display_field_label(field),
+                "type": _display_field_type(field),
+            }
+            for field in profile.detail_display_fields
+        ],
+        "tag_limit_card": 3,
+        "tag_limit_detail": 8,
     }
 
 
@@ -210,6 +265,61 @@ def _field_label(field: str) -> str:
         "directors": "Director",
     }
     return mapping.get(field, field.replace("_", " ").title())
+
+
+def _display_field_label(field: str) -> str:
+    """Return UX labels for card/detail rendering fields."""
+    mapping = {
+        "price": "Price",
+        "nib_size": "Nib Size",
+        "nib_sizes": "Nib Sizes",
+        "release_year": "Year",
+        "runtime_minutes": "Runtime",
+        "vote_average": "Rating",
+        "genres": "Genres",
+        "description": "Description",
+        "url": "Source",
+    }
+    return mapping.get(field, _field_label(field))
+
+
+def _display_field_type(field: str) -> str:
+    """Return frontend display type for one configured field."""
+    if field in {"price"}:
+        return "price"
+    if field in {"release_year", "runtime_minutes", "vote_average"}:
+        return "number"
+    if field in {"genres", "tags", "keywords", "directors", "production_companies", "nib_sizes"}:
+        return "list"
+    if field in {"description"}:
+        return "long_text"
+    if field in {"url"}:
+        return "link"
+    return "text"
+
+
+def clean_display_tags(category: str | None, tags: list[str] | None, limit: int = 8) -> list[str]:
+    """Filter noisy/system tags and return a short user-facing list."""
+    if not tags:
+        return []
+    profile = get_category_profile(category)
+    hidden = {token.lower() for token in profile.hidden_tag_tokens}
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in tags:
+        tag = (raw or "").strip()
+        if not tag:
+            continue
+        slug = tag.lower()
+        if slug in hidden:
+            continue
+        if slug in seen:
+            continue
+        seen.add(slug)
+        cleaned.append(tag)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
 
 
 def humanize_feature(raw: str) -> str | None:
