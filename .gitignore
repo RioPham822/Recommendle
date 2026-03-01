@@ -49,6 +49,11 @@ __pycache__/
 # ── Generated reports (run evaluate_pbcf.py to regenerate) ──
 backend/reports/
 
+# ── Database files ──
+*.db
+*.csv
+
+
 # ── Logs ──
 *.log
 npm-debug.log*
@@ -63,3 +68,6 @@ nul
 
 backend/backups/
 backend/data/tmdb_ingest_checkpoint.json
+
+*.conf
+.coverage

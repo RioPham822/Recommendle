@@ -1,411 +1,283 @@
 """
-Ingest a large movie catalog from TMDB into MongoDB products collection.
+Ingest movies from TMDB into Postgres products table (category=movies).
 
 Usage:
     cd backend
-    set TMDB_API_KEY=...
-    python -m scripts.ingest_movies_tmdb --max-movies 50000
+    python -m scripts.ingest_movies_tmdb --max-movies 1000
 """
+
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
-import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
-from pymongo import MongoClient
+from sqlalchemy import and_, select
+from tqdm import tqdm
 
-# Ensure `app.*` imports work whether run from repo root or backend/.
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+    sys.path.append(str(ROOT_DIR))
 
-from app.db_mongo import settings
-
-
-TMDB_BASE = "https://api.themoviedb.org/3"
+DATA_DIR = ROOT_DIR / "data"
+CHECKPOINT_PATH = DATA_DIR / "tmdb_ingest_checkpoint.json"
+TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
 
-@dataclass
-class IngestConfig:
-    api_key: str
-    max_movies: int
-    language: str
-    min_vote_count: int
-    sleep_ms: int
-    checkpoint_path: Path
-    start_year: int
-    end_year: int
+def _load_checkpoint() -> dict[str, Any]:
+    """Load ingest checkpoint from disk, returning empty state on failure."""
+    if not CHECKPOINT_PATH.exists():
+        return {}
+    try:
+        return json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
-def _request(
-    api_key: str,
-    path: str,
-    *,
-    params: dict[str, Any] | None = None,
-    retries: int = 4,
-) -> dict[str, Any]:
-    query = {"api_key": api_key}
-    if params:
-        query.update(params)
-    url = f"{TMDB_BASE}{path}"
-
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        try:
-            response = requests.get(url, params=query, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            backoff = 2 ** attempt
-            time.sleep(backoff)
-    if last_error:
-        raise last_error
-    raise RuntimeError("TMDB request failed unexpectedly")
+def _save_checkpoint(data: dict[str, Any]) -> None:
+    """Persist ingest checkpoint to disk."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CHECKPOINT_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def _slug(text: str) -> str:
-    base = "".join(ch.lower() if ch.isalnum() else "-" for ch in text)
-    while "--" in base:
-        base = base.replace("--", "-")
-    return base.strip("-")
-
-
-def _decade_bucket(release_year: int | None) -> str | None:
-    if not release_year:
+def _runtime_bucket(minutes: int | None) -> str | None:
+    """Bucket runtime minutes into short/medium/long labels."""
+    if minutes is None:
         return None
-    decade = (release_year // 10) * 10
-    return f"{decade}s"
-
-
-def _runtime_bucket(runtime_minutes: int | None) -> str | None:
-    if runtime_minutes is None:
-        return None
-    if runtime_minutes < 90:
+    if minutes < 90:
         return "short"
-    if runtime_minutes <= 130:
-        return "standard"
+    if minutes <= 130:
+        return "medium"
     return "long"
 
 
-def _certification(detail: dict[str, Any], preferred_country: str = "US") -> str | None:
-    releases = detail.get("release_dates", {}).get("results", [])
-    first_non_empty: str | None = None
-    for country_row in releases:
-        iso = country_row.get("iso_3166_1")
-        for rel in country_row.get("release_dates", []):
-            cert = (rel.get("certification") or "").strip()
-            if not cert:
-                continue
-            if iso == preferred_country:
-                return cert
-            if first_non_empty is None:
-                first_non_empty = cert
-    return first_non_empty
-
-
-def _normalized_movie_doc(detail: dict[str, Any], *, language: str) -> dict[str, Any] | None:
-    tmdb_id = detail.get("id")
-    title = (detail.get("title") or "").strip()
-    if not tmdb_id or not title:
+def _decade_bucket(year: int | None) -> str | None:
+    """Convert year to decade label (for example, 1990s)."""
+    if year is None:
         return None
-    if detail.get("adult", False):
-        return None
+    return f"{(year // 10) * 10}s"
 
-    release_date = (detail.get("release_date") or "").strip()
-    release_year: int | None = None
-    if len(release_date) >= 4 and release_date[:4].isdigit():
-        release_year = int(release_date[:4])
 
-    runtime = detail.get("runtime")
-    if runtime is not None:
-        try:
-            runtime = int(runtime)
-        except (TypeError, ValueError):
-            runtime = None
+def _build_movie_doc(movie: dict[str, Any]) -> dict[str, Any]:
+    """Transform TMDB movie payload into canonical Postgres product document."""
+    release_date = str(movie.get("release_date") or "")
+    release_year = int(release_date[:4]) if len(release_date) >= 4 and release_date[:4].isdigit() else None
+    runtime = movie.get("runtime")
+    runtime_minutes = int(runtime) if isinstance(runtime, (int, float)) else None
 
-    vote_average = detail.get("vote_average")
-    popularity = detail.get("popularity")
-    vote_count = int(detail.get("vote_count") or 0)
-
-    companies = [
-        (c.get("name") or "").strip()
-        for c in detail.get("production_companies", [])
-        if (c.get("name") or "").strip()
-    ]
+    genres = [g.get("name") for g in (movie.get("genres") or []) if g.get("name")]
+    keywords = [k.get("name") for k in ((movie.get("keywords") or {}).get("keywords") or []) if k.get("name")]
+    companies = [c.get("name") for c in (movie.get("production_companies") or []) if c.get("name")]
     directors = [
-        (c.get("name") or "").strip()
-        for c in detail.get("credits", {}).get("crew", [])
-        if c.get("job") == "Director" and (c.get("name") or "").strip()
-    ]
-    genres = [
-        (g.get("name") or "").strip()
-        for g in detail.get("genres", [])
-        if (g.get("name") or "").strip()
-    ]
-    keywords = [
-        (k.get("name") or "").strip()
-        for k in detail.get("keywords", {}).get("keywords", [])
-        if (k.get("name") or "").strip()
+        c.get("name") for c in (movie.get("credits") or {}).get("crew") or [] if c.get("job") == "Director" and c.get("name")
     ]
 
-    countries = [
-        (c.get("iso_3166_1") or "").strip()
-        for c in detail.get("production_countries", [])
-        if (c.get("iso_3166_1") or "").strip()
-    ]
-    primary_country = countries[0] if countries else None
+    primary_country = None
+    countries = movie.get("production_countries") or []
+    if countries:
+        primary_country = countries[0].get("iso_3166_1")
 
-    poster_path = detail.get("poster_path")
-    backdrop_path = detail.get("backdrop_path")
-    images = []
+    certification = None
+    for country_row in (movie.get("release_dates") or {}).get("results") or []:
+        if country_row.get("iso_3166_1") == "US":
+            for rel in country_row.get("release_dates") or []:
+                cert = rel.get("certification")
+                if cert:
+                    certification = cert
+                    break
+            if certification:
+                break
+
+    poster_path = movie.get("poster_path")
+    images: list[dict[str, Any]] = []
     if poster_path:
-        images.append({"url": f"{TMDB_IMAGE_BASE}{poster_path}", "alt": f"{title} poster", "position": 0})
-    if backdrop_path:
-        images.append({"url": f"{TMDB_IMAGE_BASE}{backdrop_path}", "alt": f"{title} backdrop", "position": 1})
+        images.append({"url": f"{TMDB_IMAGE_BASE}{poster_path}", "alt": movie.get("title"), "position": 0})
 
-    description = (detail.get("overview") or "").strip() or None
-    certification = _certification(detail)
-    language_code = (detail.get("original_language") or "").strip() or None
+    source_id = str(movie.get("id"))
+    title = str(movie.get("title") or "Untitled")
+    vote_average = float(movie["vote_average"]) if movie.get("vote_average") is not None else None
+    popularity = float(movie["popularity"]) if movie.get("popularity") is not None else None
 
     return {
-        "category": "movies",
         "schema_version": 2,
-        "source_id": f"tmdb_movie_{tmdb_id}",
+        "source_id": source_id,
         "title": title,
-        "handle": _slug(f"{title}-{tmdb_id}"),
-        "vendor": companies[0] if companies else "Unknown Studio",
-        "product_type": "Movie",
+        "vendor": companies[0] if companies else None,
+        "product_type": "movie",
         "price_min": None,
         "price_max": None,
         "currency": "USD",
-        "tags": genres[:6],
+        "tags": genres[:8],
         "options": {},
         "release_year": release_year,
-        "runtime_minutes": runtime,
-        "vote_average": float(vote_average) if vote_average is not None else None,
-        "popularity": float(popularity) if popularity is not None else None,
-        "original_language": language_code,
+        "runtime_minutes": runtime_minutes,
+        "vote_average": vote_average,
+        "popularity": popularity,
+        "original_language": movie.get("original_language"),
         "certification": certification,
         "primary_country": primary_country,
         "decade_bucket": _decade_bucket(release_year),
-        "runtime_bucket": _runtime_bucket(runtime),
-        "genres": genres[:8],
-        "keywords": keywords[:15],
-        "production_companies": companies[:8],
-        "directors": directors[:4],
-        "description": description,
-        "url": f"https://www.themoviedb.org/movie/{tmdb_id}",
+        "runtime_bucket": _runtime_bucket(runtime_minutes),
+        "genres": genres,
+        "keywords": keywords,
+        "production_companies": companies,
+        "directors": directors,
+        "description": movie.get("overview"),
+        "url": f"https://www.themoviedb.org/movie/{source_id}",
         "images": images,
-        "created_at": datetime.now(timezone.utc),
-        "movie_vote_count": vote_count,
-        "language_requested": language,
     }
 
 
-def _passes_quality_filters(doc: dict[str, Any], *, min_vote_count: int) -> bool:
-    if not doc.get("images"):
-        return False
-    if not doc.get("description"):
-        return False
-    if not doc.get("runtime_minutes"):
-        return False
-    if int(doc.get("movie_vote_count") or 0) < min_vote_count:
-        return False
-    return True
+def _tmdb_get(api_key: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Perform one TMDB API GET request and return parsed JSON body."""
+    query = {"api_key": api_key}
+    if params:
+        query.update(params)
+    resp = requests.get(f"{TMDB_BASE_URL}{path}", params=query, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
 
 
-def _load_checkpoint(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"next_page": 1, "upserted_count": 0}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return {"next_page": 1, "upserted_count": 0}
+async def ingest_movies(
+    *,
+    max_movies: int,
+    start_year: int,
+    end_year: int,
+    resume: bool,
+) -> None:
+    """Ingest movies from TMDB into Postgres with resume checkpoint support."""
+    from app.db import ProductRecord, get_db, init_db, settings
 
+    api_key = (settings.tmdb_api_key or "").strip()
+    if not api_key:
+        raise SystemExit("TMDB_API_KEY is missing in backend/.env")
 
-def _save_checkpoint(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    await init_db()
+    db_gen = get_db()
+    db = await anext(db_gen)
 
-
-def ingest_movies(config: IngestConfig) -> None:
-    client = MongoClient(settings.mongodb_url)
-    db = client[settings.mongodb_db_name]
-    products = db.products
-
-    checkpoint = _load_checkpoint(config.checkpoint_path)
+    checkpoint = _load_checkpoint() if resume else {}
+    year = int(checkpoint.get("current_year", end_year))
+    page = int(checkpoint.get("next_page", 1))
     upserted = int(checkpoint.get("upserted_count", 0))
-    if "current_year" not in checkpoint:
-        # Legacy checkpoint from single-stream paging mode: restart with year slicing.
-        page = 1
-        current_year = config.start_year
-    else:
-        page = max(int(checkpoint.get("next_page", 1)), 1)
-        page = min(page, 500)
-        current_year = int(checkpoint.get("current_year", config.start_year))
-    current_year = min(max(current_year, config.end_year), config.start_year)
 
-    print(
-        f"Starting TMDB ingest at year {current_year}, page {page}, "
-        f"existing upserts={upserted}"
-    )
-    while upserted < config.max_movies and current_year >= config.end_year:
-        try:
-            discover = _request(
-                config.api_key,
+    pbar = tqdm(total=max_movies, initial=min(upserted, max_movies), desc="Ingesting movies")
+
+    try:
+        while year >= start_year and upserted < max_movies:
+            discover = _tmdb_get(
+                api_key,
                 "/discover/movie",
-                params={
-                    "language": config.language,
+                {
+                    "sort_by": "popularity.desc",
                     "include_adult": "false",
                     "include_video": "false",
-                    "sort_by": "popularity.desc",
+                    "primary_release_year": year,
                     "page": page,
-                    "primary_release_year": current_year,
                 },
             )
-        except requests.HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            # Resilient handling for intermittent TMDB failures.
-            if status in {408, 429, 500, 502, 503, 504}:
-                print(
-                    f"Transient TMDB error on year={current_year}, page={page}, "
-                    f"status={status}; skipping page and continuing."
-                )
-                page += 1
-                if page > 500:
-                    current_year -= 1
-                    page = 1
-                _save_checkpoint(
-                    config.checkpoint_path,
-                    {
-                        "current_year": current_year,
-                        "next_page": page,
-                        "upserted_count": upserted,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
-                continue
-            raise
-        results = discover.get("results", [])
-        total_pages = int(discover.get("total_pages") or page)
-        capped_total_pages = max(1, min(total_pages, 500))
-        if not results:
-            # No results for this year/page; advance to next year.
-            current_year -= 1
-            page = 1
-            continue
+            results = discover.get("results") or []
+            total_pages = int(discover.get("total_pages") or 1)
 
-        for summary in results:
-            if upserted >= config.max_movies:
-                break
-            movie_id = summary.get("id")
-            if not movie_id:
+            if not results:
+                year -= 1
+                page = 1
                 continue
-            try:
-                detail = _request(
-                    config.api_key,
-                    f"/movie/{movie_id}",
-                    params={
-                        "language": config.language,
-                        "append_to_response": "keywords,credits,release_dates",
-                    },
-                )
-            except requests.HTTPError as exc:
-                status = exc.response.status_code if exc.response is not None else None
-                if status in {408, 429, 500, 502, 503, 504}:
-                    print(f"Transient detail error for movie {movie_id} (status={status}); skipping.")
+
+            for row in results:
+                if upserted >= max_movies:
+                    break
+                movie_id = row.get("id")
+                if not movie_id:
                     continue
-                # Non-transient errors (e.g. 404) should not crash full ingest.
-                print(f"Detail request failed for movie {movie_id} (status={status}); skipping.")
-                continue
 
-            doc = _normalized_movie_doc(detail, language=config.language)
-            if not doc:
-                continue
-            if not _passes_quality_filters(doc, min_vote_count=config.min_vote_count):
-                continue
+                detail = _tmdb_get(
+                    api_key,
+                    f"/movie/{movie_id}",
+                    {"append_to_response": "credits,keywords,release_dates"},
+                )
+                doc = _build_movie_doc(detail)
+                source_id = doc["source_id"]
+                existing = await db.scalar(
+                    select(ProductRecord).where(
+                        and_(
+                            ProductRecord.category == "movies",
+                            ProductRecord.data["source_id"].as_string() == source_id,
+                        )
+                    )
+                )
+                if existing:
+                    existing.data = doc
+                else:
+                    db.add(
+                        ProductRecord(
+                            category="movies",
+                            data=doc,
+                        )
+                    )
 
-            source_id = doc["source_id"]
-            products.update_one(
-                {"category": "movies", "source_id": source_id},
-                {"$set": doc},
-                upsert=True,
-            )
-            upserted += 1
+                upserted += 1
+                pbar.update(1)
 
-            if upserted % 50 == 0:
-                print(f"Upserted {upserted} movies...")
+                if upserted % 100 == 0:
+                    await db.commit()
+                    _save_checkpoint(
+                        {
+                            "current_year": year,
+                            "next_page": page,
+                            "upserted_count": upserted,
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
 
-            time.sleep(max(config.sleep_ms, 0) / 1000.0)
+            page += 1
+            if page > total_pages:
+                year -= 1
+                page = 1
 
-        page += 1
-        if page > capped_total_pages:
-            print(
-                f"Finished year {current_year} "
-                f"(pages: {capped_total_pages}, upserts: {upserted})."
-            )
-            current_year -= 1
-            page = 1
-
+        await db.commit()
         _save_checkpoint(
-            config.checkpoint_path,
             {
-                "current_year": current_year,
+                "current_year": year,
                 "next_page": page,
                 "upserted_count": upserted,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
+            }
         )
+    finally:
+        pbar.close()
+        await db_gen.aclose()
 
-    products.create_index([("category", 1), ("source_id", 1)], unique=True)
-    products.create_index([("category", 1), ("title", 1)])
-    products.create_index([("category", 1), ("release_year", 1)])
-    products.create_index([("category", 1), ("vendor", 1)])
-    print(f"Ingest complete. Total upserts this run reached: {upserted}")
-    client.close()
+    print(f"[tmdb] completed upserts: {upserted}")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ingest movies from TMDB")
-    parser.add_argument("--max-movies", type=int, default=50000)
-    parser.add_argument("--language", type=str, default="en-US")
-    parser.add_argument("--min-vote-count", type=int, default=100)
-    parser.add_argument("--sleep-ms", type=int, default=50)
-    parser.add_argument("--start-year", type=int, default=datetime.now(timezone.utc).year)
-    parser.add_argument("--end-year", type=int, default=1950)
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        default=str(ROOT_DIR / "data" / "tmdb_ingest_checkpoint.json"),
-    )
+    """Parse CLI options for TMDB ingestion."""
+    parser = argparse.ArgumentParser(description="Ingest TMDB movies into Postgres")
+    parser.add_argument("--max-movies", type=int, default=1000, help="Maximum number of movies to ingest")
+    parser.add_argument("--start-year", type=int, default=1950, help="Earliest release year to scan")
+    parser.add_argument("--end-year", type=int, default=datetime.now().year, help="Latest release year to start from")
+    parser.add_argument("--no-resume", action="store_true", help="Ignore checkpoint and start fresh")
     return parser.parse_args()
 
 
 def main() -> None:
+    """CLI entrypoint for TMDB ingestion."""
     args = parse_args()
-    api_key = (settings.tmdb_api_key or "").strip()
-    if not api_key:
-        raise SystemExit("TMDB_API_KEY is required in backend/.env.")
-
-    config = IngestConfig(
-        api_key=api_key,
-        max_movies=args.max_movies,
-        language=args.language,
-        min_vote_count=args.min_vote_count,
-        sleep_ms=args.sleep_ms,
-        checkpoint_path=Path(args.checkpoint),
-        start_year=args.start_year,
-        end_year=args.end_year,
+    asyncio.run(
+        ingest_movies(
+            max_movies=max(1, int(args.max_movies)),
+            start_year=int(args.start_year),
+            end_year=int(args.end_year),
+            resume=not args.no_resume,
+        )
     )
-    ingest_movies(config)
 
 
 if __name__ == "__main__":

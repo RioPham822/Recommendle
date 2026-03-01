@@ -1,0 +1,11 @@
+# Treat all text files as UTF-8 and normalize line endings
+* text=auto
+*.py text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.csv text eol=lf
+*.conf text eol=lf

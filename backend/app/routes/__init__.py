@@ -1,3 +1,1 @@
-from .game import router
-
-__all__ = ["router"]
+"""HTTP route modules for backend API."""

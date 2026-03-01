@@ -1,25 +1,23 @@
+"""Startup schema checks for category-aware data assumptions."""
+
 from __future__ import annotations
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..db import ProductRecord
+
+MIGRATION_COMMAND = "python -m scripts.load_db"
 
 
-MIGRATION_COMMAND = "python -m scripts.migrate_multicategory_schema"
-
-
-async def ensure_multicategory_compatibility(db: AsyncIOMotorDatabase) -> None:
+async def ensure_multicategory_compatibility(db: AsyncSession) -> None:
     """Validate startup schema expectations for category-aware gameplay."""
-    missing_categories = await db.products.count_documents({"category": {"$exists": False}})
+    missing_categories = await db.scalar(
+        select(func.count()).select_from(ProductRecord).where(ProductRecord.category.is_(None))
+    )
     if missing_categories > 0:
         raise RuntimeError(
             "Detected products without `category` field. "
             f"Run `{MIGRATION_COMMAND}` before starting the API "
             f"(missing documents: {missing_categories})."
         )
-
-    # Ensure required indexes for category-scoped queries.
-    await db.products.create_index([("category", 1), ("source_id", 1)], unique=True)
-    await db.products.create_index([("category", 1), ("title", 1)])
-    await db.products.create_index([("category", 1), ("vendor", 1)])
-    await db.products.create_index([("category", 1), ("release_year", 1)])
-    await db.games.create_index([("category", 1), ("status", 1), ("created_at", -1)])
-    await db.games.create_index([("category", 1), ("player_name", 1), ("created_at", -1)])

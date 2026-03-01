@@ -1,6 +1,10 @@
 import unittest
 
-from app.category_profiles import extract_feature_tokens, humanize_feature, normalize_category
+from app.category_profiles import (
+    extract_feature_tokens,
+    humanize_feature,
+    normalize_category,
+)
 
 
 class CategoryProfileTests(unittest.TestCase):

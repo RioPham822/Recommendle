@@ -1,23 +1,34 @@
 export default function WelcomeScreen({
   logoSrc,
+  showLogo = true,
   playerName,
   setPlayerName,
   categories = [],
   selectedCategory,
   setSelectedCategory,
   onStart,
+  onStartFresh,
   loading,
+  resumable = null,
+  resumeLoading = false,
+  categoriesLoading = false,
+  categoryLoadError = '',
+  categoryProgress = 0,
+  readyCategoryCount = 0,
   leaderboard,
   onViewPlayer,
 }) {
   const activeCategory = categories.find((c) => c.id === selectedCategory);
   const plural = activeCategory?.item_plural || 'items';
   const singular = activeCategory?.item_singular || 'item';
+  const totalCategoryCount = categories.length;
+  const showDatasetLoading = categoriesLoading || (totalCategoryCount > 0 && readyCategoryCount < totalCategoryCount);
+  const progressValue = Math.max(0, Math.min(categoryProgress, 100));
 
   return (
     <section className="screen shell welcome-screen">
       <div className="hero">
-        <img src={logoSrc} alt="Recommendle" className="app-logo" style={{ marginBottom: '0.75rem' }} />
+        {showLogo && <img src={logoSrc} alt="Recommendle" className="app-logo" style={{ marginBottom: '0.75rem' }} />}
         <h1>Can you out-pick an AI model?</h1>
         <p className="subtitle">
           Build a taste profile, then go head-to-head for 5 rounds. Pick your favorite before the AI reveals its prediction.
@@ -56,7 +67,7 @@ export default function WelcomeScreen({
           className="category-select"
           value={selectedCategory}
           onChange={(event) => setSelectedCategory(event.target.value)}
-          disabled={loading || categories.length === 0}
+          disabled={loading || categoriesLoading || categories.length === 0}
         >
           {categories.map((category) => (
             <option key={category.id} value={category.id} disabled={category.available_count < 50}>
@@ -65,9 +76,50 @@ export default function WelcomeScreen({
           ))}
         </select>
 
-        <button type="button" onClick={onStart} disabled={loading || !playerName.trim()}>
-          {loading ? 'Starting...' : 'Play'}
+        {showDatasetLoading && (
+          <div className="dataset-loading" role="status" aria-live="polite">
+            <div className="dataset-loading-head">
+              <span>
+                {categoriesLoading && totalCategoryCount === 0 ? 'Loading categories...' : 'Preparing datasets...'}
+              </span>
+              {!categoriesLoading && <strong>{progressValue}%</strong>}
+            </div>
+            <div className="dataset-progress-track">
+              <div
+                className={`dataset-progress-fill${categoriesLoading && totalCategoryCount === 0 ? ' indeterminate' : ''}`}
+                style={categoriesLoading && totalCategoryCount === 0 ? undefined : { width: `${Math.max(6, progressValue)}%` }}
+              />
+            </div>
+            {!categoriesLoading && totalCategoryCount > 0 && (
+              <p className="dataset-loading-copy">
+                Ready categories: {readyCategoryCount}/{totalCategoryCount}
+              </p>
+            )}
+            {categoryLoadError && (
+              <p className="dataset-loading-error">
+                Backend is still warming up. Retrying automatically...
+              </p>
+            )}
+          </div>
+        )}
+
+        <button type="button" onClick={onStart} disabled={loading || categoriesLoading || resumeLoading || !playerName.trim()}>
+          {loading ? 'Starting...' : resumable?.exists ? 'Continue' : 'Play'}
         </button>
+        <button
+          type="button"
+          className="secondary-btn"
+          onClick={onStartFresh}
+          disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !resumable?.can_start_fresh}
+        >
+          Start Fresh
+        </button>
+        {resumable?.exists && (
+          <p className="dataset-loading-copy">
+            Resume available for this category: round {Math.min((resumable.current_round || 0) + 1, resumable.total_rounds || 5)}
+            {' '}of {resumable.total_rounds || 5}.
+          </p>
+        )}
       </div>
 
       {leaderboard && leaderboard.length > 0 && (

@@ -1,3 +1,5 @@
+"""Prefix-based collaborative filtering primitives and hidden-preference discovery."""
+
 from __future__ import annotations
 
 import math
@@ -12,21 +14,19 @@ from ..category_profiles import (
     extract_feature_tokens,
     is_numeric_feature_key,
 )
-
-# Try to import MongoDB models, fall back to SQLAlchemy for backward compatibility
-try:
-    from ..models_mongo import Product
-except ImportError:
-    from ..models import Product
+from ..models import Product
 
 
 @dataclass
 class FeatureSpace:
+    """Sparse feature index and numeric normalization stats."""
+
     feature_index: dict[str, int]
     numeric_stats: dict[str, tuple[float, float]]
 
     @staticmethod
     def _category_of(product: Any) -> str:
+        """Resolve product category from dict/object payload."""
         if isinstance(product, dict):
             value = product.get("category")
         else:
@@ -37,6 +37,7 @@ class FeatureSpace:
 
     @classmethod
     def build(cls, products: Iterable[Product]) -> "FeatureSpace":
+        """Build a feature space from observed product documents."""
         feature_index: dict[str, int] = {}
         numeric_values: dict[str, list[float]] = defaultdict(list)
 
@@ -64,7 +65,7 @@ class FeatureSpace:
         return cls(feature_index=feature_index, numeric_stats=stats)
 
     def vectorize(self, product: Any) -> np.ndarray:
-        """Vectorize a product (works with both MongoDB and SQLAlchemy models)."""
+        """Vectorize a product document from persisted models."""
         vec = np.zeros(len(self.feature_index), dtype=np.float32)
 
         def set_feature(name: str, value: float = 1.0):
@@ -86,10 +87,14 @@ class FeatureSpace:
 
 
 class PrefixCFModel:
+    """Online user-preference model operating in `FeatureSpace`."""
+
     def __init__(self, feature_space: FeatureSpace):
+        """Bind model to a specific feature space."""
         self.feature_space = feature_space
 
     def init_state(self) -> dict:
+        """Create a fresh mutable state for one player/game."""
         return {
             "user_vec": [0.0] * len(self.feature_space.feature_index),
             "bias": 0.0,
@@ -99,6 +104,7 @@ class PrefixCFModel:
         }
 
     def update_with_selection(self, state: dict, product: Product, is_exception: bool) -> None:
+        """Update user vector with a selected product."""
         vec = self.feature_space.vectorize(product)
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         decay = float(state.get("decay", 0.85))
@@ -108,11 +114,13 @@ class PrefixCFModel:
         state["count"] = int(state.get("count", 0)) + 1
 
     def update_with_prefix_rating(self, state: dict, rating: int) -> None:
+        """Adjust model bias using explicit onboarding rating feedback."""
         predicted = self.predict_prefix_rating(state)
         error = float(rating) - predicted
         state["bias"] = float(state.get("bias", 0.0)) + 0.25 * error
 
     def predict_prefix_rating(self, state: dict) -> float:
+        """Predict 1..5 rating from current latent user state."""
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         bias = float(state.get("bias", 0.0))
         norm = float(np.linalg.norm(user_vec))
@@ -120,9 +128,10 @@ class PrefixCFModel:
         return float(min(5.0, max(1.0, base)))
 
     def score_item(self, state: dict, item_vec: np.ndarray) -> float:
+        """Score one candidate item vector against current user state."""
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         bias = float(state.get("bias", 0.0))
-        denom = (np.linalg.norm(user_vec) * np.linalg.norm(item_vec))
+        denom = np.linalg.norm(user_vec) * np.linalg.norm(item_vec)
         similarity = 0.0
         if denom > 0:
             similarity = float(np.dot(user_vec, item_vec) / denom)
@@ -130,6 +139,7 @@ class PrefixCFModel:
         return float(min(5.0, max(1.0, score)))
 
     def coherence_score(self, item_vecs: list[np.ndarray]) -> float:
+        """Compute average pairwise cosine coherence in [0, 1]."""
         if len(item_vecs) < 2:
             return 0.0
         total = 0.0
@@ -148,9 +158,9 @@ class PrefixCFModel:
     # ── Hidden-preference discovery ──────────────────────────────
 
     # Tuning constants — adjust after play-testing
-    HIDDEN_MIN_WEIGHT = 0.08       # user_vec weight must exceed this (normalised)
-    HIDDEN_MIN_LATENCY = 0.05      # latency_score must exceed this
-    HIDDEN_MIN_SELECTIONS = 2      # need at least this many picks before detecting
+    HIDDEN_MIN_WEIGHT = 0.08  # user_vec weight must exceed this (normalised)
+    HIDDEN_MIN_LATENCY = 0.05  # latency_score must exceed this
+    HIDDEN_MIN_SELECTIONS = 2  # need at least this many picks before detecting
 
     def detect_hidden_preferences(
         self,
@@ -206,11 +216,13 @@ class PrefixCFModel:
             # Numeric dimensions are noisy and not user-facing as hidden tags.
             if is_numeric_feature_key(fname):
                 continue
-            results.append({
-                "feature": fname,
-                "latency": round(ls, 4),
-                "weight": round(pw, 4),
-            })
+            results.append(
+                {
+                    "feature": fname,
+                    "latency": round(ls, 4),
+                    "weight": round(pw, 4),
+                }
+            )
 
         results.sort(key=lambda r: r["latency"], reverse=True)
         return results[:top_n]
@@ -264,11 +276,7 @@ class PrefixCFModel:
                 continue
             sim = float(np.dot(hidden_vec, item_vec) / (hidden_norm * item_norm))
             # Which hidden features does this product match?
-            matched = [
-                hidden_indices[idx]
-                for idx in hidden_indices
-                if item_vec[idx] != 0
-            ]
+            matched = [hidden_indices[idx] for idx in hidden_indices if item_vec[idx] != 0]
             if matched:
                 scored.append((sim, product, matched))
 

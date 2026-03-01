@@ -1,22 +1,25 @@
 """
-Load fountain pen data from backend/data/products.json.
+Load fountain pen data from backend/data/products.json into Postgres-backed store.
 
-Defaults to MongoDB (the active backend used by start.bat and app.main_mongo).
+Defaults to the active Postgres backend used by app.main.
 
 Usage:
     cd backend
-    python -m scripts.load_db                  # load pens into MongoDB
-    python -m scripts.load_db --target sqlite  # legacy SQLite loader
+    python -m scripts.load_db                  # load pens
+    python -m scripts.load_db --no-replace     # load without removing existing
 """
+
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import and_, delete, func, select
+from tqdm import tqdm
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -27,14 +30,15 @@ PRODUCTS_JSON = DATA_DIR / "products.json"
 
 
 def _read_products() -> list[dict[str, Any]]:
+    """Read scraped pen products from local JSON dataset."""
     if not PRODUCTS_JSON.exists():
         raise SystemExit("products.json not found. Run scrape_gouletpens.py first.")
     return json.loads(PRODUCTS_JSON.read_text(encoding="utf-8"))
 
 
 def _normalized_pen_doc(item: dict[str, Any]) -> dict[str, Any]:
+    """Map raw scraped product to canonical Postgres document shape."""
     return {
-        "category": "fountain_pens",
         "schema_version": 2,
         "source_id": item.get("source_id"),
         "title": item.get("title"),
@@ -49,126 +53,82 @@ def _normalized_pen_doc(item: dict[str, Any]) -> dict[str, Any]:
         "description": item.get("description"),
         "url": item.get("url"),
         "images": item.get("images", []),
-        "created_at": datetime.now(timezone.utc),
     }
 
 
-def load_products_mongo(replace: bool = True) -> None:
-    from pymongo import MongoClient
-    from app.db_mongo import settings
+async def load_products(replace: bool = True) -> None:
+    """Load or upsert fountain-pen products into Postgres."""
+    from app.db import ProductRecord, get_db, init_db
 
     data = _read_products()
     source_ids = [item.get("source_id") for item in data if item.get("source_id")]
-
-    client = MongoClient(settings.mongodb_url)
-    db = client[settings.mongodb_db_name]
-    products = db.products
+    await init_db()
+    db_gen = get_db()
+    db = await anext(db_gen)
 
     # Keep movies/other categories intact. Reset only fountain-pen docs
     # and any legacy docs with matching source_ids.
     if replace:
-        delete_filter = {
-            "$or": [
-                {"category": "fountain_pens"},
-                {"source_id": {"$in": source_ids}},
-            ]
-        }
-        deleted = products.delete_many(delete_filter).deleted_count
-        print(f"[mongo] removed {deleted} existing pen docs")
+        deleted_result = await db.execute(
+            delete(ProductRecord).where(
+                (ProductRecord.category == "fountain_pens") | (ProductRecord.data["source_id"].as_string().in_(source_ids))
+            )
+        )
+        await db.commit()
+        deleted = int(deleted_result.rowcount or 0)
+        print(f"[postgres] removed {deleted} existing pen docs")
 
     upserts = 0
-    for item in data:
+    for item in tqdm(data):
         source_id = item.get("source_id")
         if not source_id:
             continue
         doc = _normalized_pen_doc(item)
-        products.update_one(
-            {"category": "fountain_pens", "source_id": source_id},
-            {"$set": doc},
-            upsert=True,
+        existing = await db.scalar(
+            select(ProductRecord).where(
+                and_(
+                    ProductRecord.category == "fountain_pens",
+                    ProductRecord.data["source_id"].as_string() == source_id,
+                )
+            )
         )
+        if existing:
+            existing.data = doc
+        else:
+            db.add(
+                ProductRecord(
+                    category="fountain_pens",
+                    data=doc,
+                )
+            )
         upserts += 1
 
-    products.create_index([("category", 1), ("source_id", 1)], unique=True)
-    products.create_index([("category", 1), ("title", 1)])
-    products.create_index([("category", 1), ("vendor", 1)])
+    await db.commit()
 
-    total_pens = products.count_documents({"category": "fountain_pens"})
-    total_movies = products.count_documents({"category": "movies"})
-    print(f"[mongo] upserted {upserts} fountain pen docs")
-    print(f"[mongo] totals -> pens: {total_pens}, movies: {total_movies}")
-    client.close()
-
-
-def load_products_sqlite() -> None:
-    # Legacy loader kept for compatibility with old SQLite backend.
-    from sqlalchemy.orm import Session
-    from app.db import Base, engine, SessionLocal
-    from app.models import Product, ProductImage
-
-    data = _read_products()
-
-    def _load(db: Session) -> None:
-        db.query(ProductImage).delete()
-        db.query(Product).delete()
-        db.commit()
-
-        for item in data:
-            product = Product(
-                source_id=item.get("source_id"),
-                title=item.get("title"),
-                handle=item.get("handle"),
-                vendor=item.get("vendor"),
-                product_type=item.get("product_type"),
-                price_min=item.get("price_min"),
-                price_max=item.get("price_max"),
-                currency=item.get("currency"),
-                tags_json=json.dumps(item.get("tags", [])),
-                options_json=json.dumps(item.get("options", {})),
-                description=item.get("description"),
-                url=item.get("url"),
-            )
-            db.add(product)
-            db.flush()
-            for img in item.get("images", []):
-                db.add(
-                    ProductImage(
-                        product_id=product.id,
-                        url=img.get("url"),
-                        alt=img.get("alt"),
-                        position=img.get("position"),
-                    )
-                )
-        db.commit()
-
-    Base.metadata.create_all(bind=engine)
-    with SessionLocal() as db:
-        _load(db)
-    print("[sqlite] loaded products into SQLite database")
+    total_pens = await db.scalar(
+        select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "fountain_pens")
+    )
+    total_movies = await db.scalar(select(func.count()).select_from(ProductRecord).where(ProductRecord.category == "movies"))
+    print(f"[postgres] upserted {upserts} fountain pen docs")
+    print(f"[postgres] totals -> pens: {int(total_pens or 0)}, movies: {int(total_movies or 0)}")
+    await db_gen.aclose()
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Load fountain pen products")
-    parser.add_argument(
-        "--target",
-        choices=["mongo", "sqlite"],
-        default="mongo",
-        help="Database target (default: mongo)",
-    )
+    """Parse CLI options for pen dataset loading."""
+    parser = argparse.ArgumentParser(description="Load fountain pen products into Postgres store")
     parser.add_argument(
         "--no-replace",
         action="store_true",
-        help="Do not remove existing fountain pen docs before upsert (mongo only)",
+        help="Do not remove existing fountain pen docs before upsert",
     )
     return parser.parse_args()
 
 
 def main() -> None:
+    """CLI entrypoint for loading pen dataset."""
     args = parse_args()
-    if args.target == "mongo":
-        load_products_mongo(replace=not args.no_replace)
-    else:
-        load_products_sqlite()
+    asyncio.run(load_products(replace=not args.no_replace))
 
 
 if __name__ == "__main__":

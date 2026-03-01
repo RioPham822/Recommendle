@@ -1,3 +1,5 @@
+"""Scrape Goulet Pens catalog and export normalized JSON/CSV datasets."""
+
 import csv
 import json
 import time
@@ -14,6 +16,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def check_robots() -> bool:
+    """Return whether scraping target endpoint is allowed by robots.txt."""
     robots_url = f"{BASE_URL}/robots.txt"
     rp = robotparser.RobotFileParser()
     rp.set_url(robots_url)
@@ -22,6 +25,7 @@ def check_robots() -> bool:
 
 
 def fetch_products(limit: int = 250, delay: float = 0.5) -> list[dict]:
+    """Fetch all paginated products from the Goulet collection endpoint."""
     products = []
     page = 1
     while True:
@@ -39,6 +43,7 @@ def fetch_products(limit: int = 250, delay: float = 0.5) -> list[dict]:
 
 
 def normalize_product(raw: dict) -> dict:
+    """Normalize raw Shopify product into project dataset shape."""
     variants = raw.get("variants", [])
     prices = [float(v.get("price", 0)) for v in variants if v.get("price")]
     price_min = min(prices) if prices else None
@@ -79,6 +84,7 @@ def normalize_product(raw: dict) -> dict:
 
 
 def main():
+    """CLI/script entrypoint for scraping and exporting fountain-pen data."""
     if not check_robots():
         raise SystemExit("Robots.txt disallows scraping the fountain-pens collection.")
 

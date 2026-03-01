@@ -68,6 +68,7 @@ export default function FinalSummary({
   gameId,
   leaderboard,
   onRestart,
+  onHome,
   onViewPlayer,
 }) {
   const [summary, setSummary] = useState(null);
@@ -174,13 +175,36 @@ export default function FinalSummary({
           </p>
           <ul className="rec-list">
             {summary.top5_recommendations.map((rec, i) => (
-              <li key={rec.id} className="rec-item">
+              <li key={rec.id} className="rec-item rec-item-previewable">
                 <span className="rec-rank">#{i + 1}</span>
                 <div className="rec-info">
                   <strong>{rec.title}</strong>
                   <span className="muted">{recMeta(rec)}</span>
                 </div>
                 <span className="rec-score">{rec.score.toFixed(2)}</span>
+                <div className="rec-hover-preview">
+                  <div className="candidate-preview-media">
+                    {rec.image_url ? (
+                      <img src={rec.image_url} alt={rec.title} loading="lazy" />
+                    ) : (
+                      <div className="candidate-preview-noimg">No image</div>
+                    )}
+                  </div>
+                  <div className="candidate-preview-body">
+                    <p className="candidate-preview-title">{rec.title}</p>
+                    <p className="candidate-preview-subtitle">{rec.subtitle || rec.vendor || 'Unknown'}</p>
+                    {Object.entries(rec.attributes || {}).slice(0, 4).map(([key, value]) => (
+                      <p key={key} className="candidate-preview-attr">
+                        <strong>{key.replace(/_/g, ' ')}</strong>: {Array.isArray(value) ? value.slice(0, 2).join(', ') : String(value)}
+                      </p>
+                    ))}
+                    <div className="tag-list">
+                      {[...(rec.meta_badges || []), ...((rec.tags || []).slice(0, 3))].map((token) => (
+                        <span key={token}>{token}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
@@ -261,6 +285,7 @@ export default function FinalSummary({
       </div>
 
       <div className="round-actions" style={{ justifyContent: 'center' }}>
+        <button type="button" className="ghost" onClick={onHome}>Home</button>
         <button type="button" onClick={onRestart}>Play Again</button>
       </div>
     </section>

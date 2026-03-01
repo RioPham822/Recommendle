@@ -20,7 +20,7 @@ Users making a sequence of related product decisions (for example, choosing a se
 
 ### Out of Scope (Current Product)
 - Native mobile app
-- Full account/auth system
+- Advanced auth/authorization features (RBAC, OAuth, password reset, email verification)
 - Explicit drag-reorder/swipe UX
 - Production deployment requirements (HA, autoscaling, SSO, etc.)
 
@@ -63,7 +63,7 @@ Status legend:
 | NFR-05 | Data integrity: Product identity and core fields shall remain consistent under ingestion/migration. | Implemented via schema migration and DB indexes. |
 | NFR-06 | Testability: Core model and service behavior shall be verifiable through automated tests/scripts. | Implemented (backend tests + evaluation tooling). |
 | NFR-07 | Accessibility baseline: Inputs shall have labels, keyboard-usable controls, and visible feedback. | Implemented baseline; full WCAG audit pending. |
-| NFR-08 | Portability: System shall run in local development on standard academic/dev machines. | Implemented (Python + Node + MongoDB local stack). |
+| NFR-08 | Portability: System shall run in local development on standard academic/dev machines. | Implemented (Python + Node + Postgres local stack). |
 | NFR-09 | Visual adaptability: UI shall support both light and dark themes. | Implemented. |
 | NFR-10 | Privacy baseline: System shall minimize personal data collected during gameplay. | Implemented (player name + gameplay data only). |
 
@@ -75,8 +75,8 @@ Status legend:
 ### 6.2 Technical Constraints (Current Implementation)
 - Backend: Python + FastAPI
 - Frontend: React + Vite
-- Database: MongoDB (local/default expected in docs)
-- Runtime prerequisites: Python 3.10+, Node 18+, local MongoDB instance
+- Database: Postgres (local/default expected in docs)
+- Runtime prerequisites: Python 3.10+, Node 18+, local Postgres instance
 - Category must have sufficient inventory (50 items minimum) to start a game flow
 
 ### 6.3 Data / Integration Constraints
@@ -86,7 +86,7 @@ Status legend:
 
 ### 6.4 Product Constraints
 - Current system is web-first, not native mobile.
-- Authentication, authorization, and multi-tenant account management are not implemented.
+- Basic authentication is implemented; advanced authorization and multi-tenant account management are not implemented.
 - Current rounds are fixed in code to 5 for game mode.
 
 ## 7. Requirement Traceability to Initial Statement
@@ -103,3 +103,4 @@ From the sponsor document:
 3. Add named persistent user collections/profiles with auth (FR-20).
 4. Define measurable API/UI performance targets and success criteria (NFR-02).
 5. Add formal evaluation benchmarks with target thresholds per category.
+
