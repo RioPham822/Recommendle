@@ -1,4 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
   color-scheme: light;
@@ -98,16 +98,55 @@ button:hover {
 }
 
 .theme-toggle {
-  position: fixed;
-  top: 0.85rem;
-  right: 1rem;
-  z-index: 10;
+  position: static;
   background: var(--surface-alt);
   color: var(--ink);
   border: 2px solid var(--border);
   box-shadow: var(--shadow-sm);
   padding: 0.45rem 0.8rem;
   font-size: 0.72rem;
+}
+
+.top-right-controls {
+  position: fixed;
+  top: 0.85rem;
+  right: 1rem;
+  z-index: 20;
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+}
+
+.account-floating {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── App Header ────────────────────────────────────────────── */
+
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem;
+  margin-bottom: 2rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.app-header.welcome-header {
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+
+.app-header .header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.app-header .app-logo {
+  height: 40px;
 }
 
 button:disabled {
@@ -317,6 +356,67 @@ input:focus {
   font-size: 1rem;
 }
 
+.dataset-loading {
+  width: 100%;
+  text-align: left;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  background: var(--surface-alt);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dataset-loading-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dataset-loading-head strong {
+  color: var(--correct);
+  font-variant-numeric: tabular-nums;
+}
+
+.dataset-progress-track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.dataset-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--present), var(--correct));
+  transition: width 220ms ease;
+}
+
+.dataset-progress-fill.indeterminate {
+  width: 35%;
+  animation: indeterminate-scan 1.1s ease-in-out infinite;
+}
+
+.dataset-loading-copy {
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+}
+
+.dataset-loading-error {
+  color: #b45309;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
 /* ── Section Headers ────────────────────────────────── */
 
 .section-header {
@@ -462,6 +562,14 @@ input:focus {
   min-height: 0;
 }
 
+.product-card.mode-feature {
+  border-style: dashed;
+}
+
+.product-card.mode-feature .thumb-wrap {
+  display: none;
+}
+
 .product-card.selected {
   border-color: var(--correct);
   box-shadow: 0 0 0 3px var(--correct-soft);
@@ -513,6 +621,10 @@ input:focus {
   gap: 0.25rem;
 }
 
+.product-card.mode-feature .card-content {
+  gap: 0.45rem;
+}
+
 .card-content h3 {
   font-size: 0.9rem;
   font-weight: 700;
@@ -549,11 +661,31 @@ input:focus {
   letter-spacing: 0.04em;
 }
 
+.feature-list {
+  display: grid;
+  gap: 0.22rem;
+  text-align: left;
+}
+
+.feature-list p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.feature-list strong {
+  color: var(--ink);
+  text-transform: capitalize;
+}
+
 /* ── Round Actions ──────────────────────────────────── */
 
 .round-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 /* ── Results ────────────────────────────────────────── */
@@ -656,6 +788,86 @@ input:focus {
 .result-details li strong {
   font-variant-numeric: tabular-nums;
   color: var(--correct);
+}
+
+.candidate-item {
+  position: relative;
+}
+
+.candidate-preview {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.55rem);
+  transform: none;
+  width: 280px;
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 0.55rem;
+  display: none;
+  z-index: 8;
+}
+
+.candidate-item:hover .candidate-preview {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 0.55rem;
+}
+
+.candidate-preview-media {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-alt);
+}
+
+.candidate-preview-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.candidate-preview-noimg {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.candidate-preview-body {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.candidate-preview-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.candidate-preview-subtitle {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+}
+
+.candidate-preview-attr {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+.candidate-preview-attr strong {
+  color: var(--ink);
+  text-transform: capitalize;
 }
 
 /* ── Leaderboard ────────────────────────────────────── */
@@ -861,6 +1073,11 @@ input:focus {
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+@keyframes indeterminate-scan {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(300%); }
 }
 
 @keyframes banner-enter {
@@ -1307,6 +1524,30 @@ input:focus {
   background: var(--surface-alt);
 }
 
+.rec-item-previewable {
+  position: relative;
+}
+
+.rec-hover-preview {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.55rem);
+  width: 280px;
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 0.55rem;
+  display: none;
+  z-index: 8;
+}
+
+.rec-item-previewable:hover .rec-hover-preview {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 0.55rem;
+}
+
 .rec-rank {
   font-weight: 800;
   font-size: 0.9rem;
@@ -1593,9 +1834,12 @@ body[data-theme='dark'] .feature-tag.negative {
 /* ── Responsive adjustments for player stats ────────── */
 
 @media (max-width: 740px) {
-  .theme-toggle {
+  .top-right-controls {
     top: 0.5rem;
     right: 0.5rem;
+  }
+
+  .theme-toggle {
     font-size: 0.68rem;
     padding: 0.4rem 0.65rem;
   }

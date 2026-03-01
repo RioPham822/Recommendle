@@ -1,113 +1,138 @@
+"""Pydantic domain and API DTO models used by the backend."""
+
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any, Optional
+from uuid import uuid4
 
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Float,
-    DateTime,
-    ForeignKey,
-    Boolean,
-    Text,
-)
-from sqlalchemy.orm import relationship
-
-from .db import Base
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class Product(Base):
-    __tablename__ = "products"
-
-    id = Column(Integer, primary_key=True, index=True)
-    source_id = Column(String, unique=True, index=True)
-    title = Column(String, index=True)
-    handle = Column(String, index=True)
-    vendor = Column(String, index=True)
-    product_type = Column(String, index=True)
-    price_min = Column(Float)
-    price_max = Column(Float)
-    currency = Column(String)
-    tags_json = Column(Text)
-    options_json = Column(Text)
-    description = Column(Text)
-    url = Column(String)
-
-    images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
-
-    def tags(self) -> list[str]:
-        if not self.tags_json:
-            return []
-        return json.loads(self.tags_json)
-
-    def options(self) -> dict[str, list[str]]:
-        if not self.options_json:
-            return {}
-        return json.loads(self.options_json)
+def new_id() -> str:
+    """Generate compact hex identifier for model defaults."""
+    return uuid4().hex
 
 
-class ProductImage(Base):
-    __tablename__ = "product_images"
+class BaseDocModel(BaseModel):
+    """Base model for persisted documents."""
 
-    id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("products.id"))
-    url = Column(String)
-    alt = Column(String)
-    position = Column(Integer)
+    id: Optional[str] = Field(default_factory=new_id, alias="_id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    product = relationship("Product", back_populates="images")
-
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+    )
 
 
-class Session(Base):
-    __tablename__ = "sessions"
+class ProductImage(BaseDocModel):
+    """Image metadata persisted alongside product data."""
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    state_json = Column(Text)
-
-    user = relationship("User", back_populates="sessions")
-    selections = relationship("Selection", back_populates="session", cascade="all, delete-orphan")
-    prefix_ratings = relationship("PrefixRating", back_populates="session", cascade="all, delete-orphan")
+    url: str
+    alt: Optional[str] = None
+    position: int = 0
 
 
-class Selection(Base):
-    __tablename__ = "selections"
+class Product(BaseDocModel):
+    """Generic product envelope with category and dynamic payload."""
 
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"))
-    product_id = Column(Integer, ForeignKey("products.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    is_exception = Column(Boolean, default=False)
+    category: str = "fountain_pens"
+    data: dict[str, Any] = Field(default_factory=dict)
 
-    session = relationship("Session", back_populates="selections")
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        extra="allow",
+        json_encoders={datetime: lambda v: v.isoformat()},
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coalesce_payload(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value.get("data") or {})
+        core = {"_id", "id", "created_at", "category", "data"}
+        for key, item in value.items():
+            if key in core:
+                continue
+            payload.setdefault(key, item)
+        normalized = dict(value)
+        normalized["data"] = payload
+        return normalized
 
 
-class PrefixRating(Base):
-    __tablename__ = "prefix_ratings"
+class User(BaseDocModel):
+    """User model used by API/domain layer."""
 
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"))
-    rating = Column(Integer)
-    tags_json = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    username: str = Field(..., index=True, unique=True)
+    password_hash: str
+    display_name: str
+    games: list[str] = Field(default_factory=list)
+    session_tokens: list[str] = Field(default_factory=list)
 
-    session = relationship("Session", back_populates="prefix_ratings")
 
-    def tags(self) -> list[str]:
-        if not self.tags_json:
-            return []
-        return json.loads(self.tags_json)
+class PrefixRating(BaseDocModel):
+    """Prefix rating event used to train/update preference models."""
+
+    session_id: str = Field(..., description="Reference to session")
+    rating: int = Field(..., ge=1, le=5)
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# Response models (DTOs)
+class ProductOut(BaseModel):
+    """Public product DTO returned by listing/detail endpoints."""
+
+    id: str
+    category: str = "fountain_pens"
+    title: str
+    vendor: Optional[str] = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_record(cls, product: Product) -> "ProductOut":
+        """Build API DTO from internal product model."""
+        data = dict(product.data or {})
+        title = str(data.get("title") or "Untitled")
+        vendor = data.get("vendor")
+        if vendor is not None:
+            vendor = str(vendor)
+        return cls(
+            id=str(product.id),
+            category=product.category,
+            title=title,
+            vendor=vendor,
+            data=data,
+        )
+
+
+class UserOut(BaseModel):
+    """Public user DTO returned by auth endpoints."""
+
+    id: str
+    username: str
+    display_name: str
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, user: User) -> "UserOut":
+        """Build API DTO from internal user model."""
+        return cls(id=str(user.id), username=user.username, display_name=user.display_name, created_at=user.created_at)
+
+
+class UserCreate(BaseModel):
+    """Incoming payload for minimal user creation flows."""
+
+    name: str
+
+
+class RecommendationOut(BaseModel):
+    """Recommendation response payload."""
+
+    strong: list[ProductOut]
+    wildcard: Optional[ProductOut]
+    coherence_score: float
+    predicted_prefix_rating: float

@@ -1,69 +1,53 @@
-﻿from __future__ import annotations
+"""Core game-service composition root and shared utility methods."""
+
+from __future__ import annotations
 
 import hashlib
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import numpy as np
-from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy import and_, delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
     category_copy,
     get_category_profile,
-    humanize_feature as profile_humanize_feature,
-    humanize_feature_list as profile_humanize_feature_list,
     normalize_category,
-    numeric_preference_label,
     supported_categories,
 )
+from ..db import (
+    GameRecord,
+    GameRoundRecord,
+    PrefixRatingRecord,
+    ProductRecord,
+    record_to_dict,
+)
 from ..ml.prefix_cf import PrefixCFModel
-from ..services.recommender_mongo import recommender_mongo
-
-def humanize_feature(raw: str) -> str | None:
-    return profile_humanize_feature(raw)
-
-
-def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    return profile_humanize_feature_list(raw_list)
+from ..services.recommender import recommender
+from .game_insights import GameInsightsMixin
+from .game_play import GamePlayMixin
 
 
-class GameService:
-    """Sequential preference game service (50->10 onboarding, 5-round duel)."""
+class GameService(GamePlayMixin, GameInsightsMixin):
+    """Primary game service combining gameplay and insights mixins."""
 
     def __init__(self):
-        self.recommender = recommender_mongo
-        self._indexes_ready = False
+        """Initialize shared recommender and in-memory scoring cache."""
+        self.recommender = recommender
+        self._scoring_catalog_cache: dict[str, dict[str, Any]] = {}
 
-    async def _ensure_indexes(self, db: AsyncIOMotorDatabase) -> None:
-        if self._indexes_ready:
-            return
+    async def _ensure_indexes(self, db: AsyncSession) -> None:
+        """Compatibility shim for previous backends; indexes are managed in init_db."""
+        return None
 
-        await db.games.create_index([("status", 1), ("created_at", -1)])
-        await db.games.create_index([("player_name", 1), ("created_at", -1)])
-        await db.games.create_index([("category", 1), ("status", 1), ("created_at", -1)])
-        await db.games.create_index([("category", 1), ("player_name", 1), ("created_at", -1)])
-        await db.game_rounds.create_index(
-            [("game_id", 1), ("round_number", 1)],
-            unique=True,
-            name="game_id_round_number_unique_v2",
-            partialFilterExpression={"game_id": {"$type": "objectId"}},
-        )
-        await db.game_rounds.create_index([("game_id", 1), ("created_at", -1)])
-        await db.products.create_index([("category", 1), ("source_id", 1)], unique=True)
-        await db.products.create_index([("category", 1), ("title", 1)])
-        await db.products.create_index([("category", 1), ("vendor", 1)])
-        await db.products.create_index([("category", 1), ("release_year", 1)])
-        self._indexes_ready = True
-
-    async def _ensure_model(self, db: AsyncIOMotorDatabase) -> PrefixCFModel:
+    async def _ensure_model(self, db: AsyncSession) -> PrefixCFModel:
+        """Ensure feature space/model are loaded before scoring operations."""
         if self.recommender.feature_space is None or self.recommender.model is None:
             await self.recommender.refresh(db)
-
         if self.recommender.feature_space is None or self.recommender.model is None:
             raise ValueError("Recommendation model is not initialized")
-
         return PrefixCFModel(self.recommender.feature_space)
 
     @staticmethod
@@ -71,12 +55,6 @@ class GameService:
         seed_material = f"{game_id}:{round_number}:{salt}".encode("utf-8")
         seed = int(hashlib.sha256(seed_material).hexdigest()[:16], 16)
         return random.Random(seed)
-
-    @staticmethod
-    def _to_object_id(value: str, label: str) -> ObjectId:
-        if not ObjectId.is_valid(value):
-            raise ValueError(f"Invalid {label}")
-        return ObjectId(value)
 
     @staticmethod
     def _game_category(game: dict[str, Any]) -> str:
@@ -87,11 +65,9 @@ class GameService:
 
     @staticmethod
     def _align_state_to_feature_space(model: PrefixCFModel, state: dict[str, Any]) -> bool:
-        """Pad/truncate persisted user vectors when feature space evolves over time."""
         expected_dim = len(model.feature_space.feature_index)
         raw_vec = state.get("user_vec")
         changed = False
-
         if not isinstance(raw_vec, list):
             vec = [0.0] * expected_dim
             changed = True
@@ -103,30 +79,30 @@ class GameService:
                 except (TypeError, ValueError):
                     vec.append(0.0)
                     changed = True
-
             if len(vec) < expected_dim:
                 vec.extend([0.0] * (expected_dim - len(vec)))
                 changed = True
             elif len(vec) > expected_dim:
                 vec = vec[:expected_dim]
                 changed = True
-
         state["user_vec"] = vec
         return changed
 
-    @staticmethod
-    def _category_product_filter(category: str) -> dict[str, Any]:
-        if category == "fountain_pens":
-            return {"$or": [{"category": "fountain_pens"}, {"category": {"$exists": False}}]}
-        return {"category": category}
+    def _feature_projection(self, category: str) -> dict[str, int]:
+        """Build field projection for model features of a category."""
+        profile = get_category_profile(category)
+        fields = {"category", *profile.categorical_fields, *profile.multi_fields, *profile.numeric_fields}
+        return {field: 1 for field in fields}
 
-    @staticmethod
-    def _category_query(category: str) -> dict[str, Any]:
-        if category == "fountain_pens":
-            return {"$or": [{"category": "fountain_pens"}, {"category": {"$exists": False}}]}
-        return {"category": category}
+    def _card_projection(self, category: str) -> dict[str, int]:
+        """Build projection for card rendering (features + title/image)."""
+        projection = self._feature_projection(category)
+        for field in ("title", "images"):
+            projection[field] = 1
+        return projection
 
     def _product_card(self, product: dict[str, Any], category: str | None = None) -> dict[str, Any]:
+        """Normalize a product into a category-aware UI card payload."""
         resolved_category = normalize_category(category or product.get("category") or "fountain_pens")
         profile = get_category_profile(resolved_category)
         image_url = None
@@ -136,6 +112,13 @@ class GameService:
 
         badges: list[str] = []
         subtitle = product.get("vendor")
+        attributes: dict[str, Any] = {}
+        for field in (*profile.categorical_fields, *profile.multi_fields, *profile.numeric_fields):
+            if field in {"tags", "vendor"}:
+                continue
+            value = product.get(field)
+            if value is not None:
+                attributes[field] = value
         if resolved_category == "movies":
             release_year = product.get("release_year")
             runtime = product.get("runtime_minutes")
@@ -145,7 +128,7 @@ class GameService:
             if runtime:
                 badges.append(f"{runtime}m")
             if vote_avg:
-                badges.append(f"{float(vote_avg):.1f}★")
+                badges.append(f"{float(vote_avg):.1f}*")
             directors = product.get("directors") or []
             if directors:
                 subtitle = f"Dir. {directors[0]}"
@@ -160,52 +143,70 @@ class GameService:
             "subtitle": subtitle,
             "price_min": product.get("price_min"),
             "price_max": product.get("price_max"),
-            "release_year": product.get("release_year"),
-            "runtime_minutes": product.get("runtime_minutes"),
-            "vote_average": product.get("vote_average"),
+            "attributes": attributes,
             "meta_badges": badges,
             "tags": product.get("tags", [])[:8],
             "image_url": image_url,
         }
 
-    async def _get_game(self, db: AsyncIOMotorDatabase, game_id: str) -> dict[str, Any]:
-        oid = self._to_object_id(game_id, "game ID")
-        game = await db.games.find_one({"_id": oid})
-        if game is None:
+    async def _get_game(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
+        """Load one game row and normalize to dict shape used by services."""
+        row = await db.scalar(select(GameRecord).where(GameRecord.id == game_id))
+        if row is None:
             raise ValueError("Game not found")
+        game = record_to_dict(row)
         if "category" not in game:
             game["category"] = "fountain_pens"
         return game
 
     async def _get_products_by_ids(
         self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         ids: list[str],
         projection: dict[str, int] | None = None,
     ) -> list[dict[str, Any]]:
-        object_ids = [ObjectId(pid) for pid in ids if ObjectId.is_valid(pid)]
-        if not object_ids:
+        """Fetch products preserving requested ID order with optional projection."""
+        if not ids:
             return []
-        cursor = db.products.find({"_id": {"$in": object_ids}}, projection)
-        products = await cursor.to_list(length=len(object_ids))
-        by_id = {str(p["_id"]): p for p in products}
-        return [by_id[pid] for pid in ids if pid in by_id]
+        rows = (await db.execute(select(ProductRecord).where(ProductRecord.id.in_(ids)))).scalars().all()
+        by_id = {row.id: record_to_dict(row) for row in rows}
+        docs = [by_id[pid] for pid in ids if pid in by_id]
+        if projection:
+            projected: list[dict[str, Any]] = []
+            include_keys = {k for k, v in projection.items() if v}
+            for doc in docs:
+                item = {}
+                for key in include_keys:
+                    if key in doc:
+                        item[key] = doc[key]
+                if projection.get("_id", 1):
+                    item["_id"] = doc["_id"]
+                projected.append(item)
+            return projected
+        return docs
 
-    async def _completed_pick_ids(self, db: AsyncIOMotorDatabase, game_id: str) -> list[str]:
-        oid = self._to_object_id(game_id, "game ID")
-        cursor = db.game_rounds.find(
-            {"game_id": oid, "completed": True},
-            {"human_pick_id": 1, "_id": 0},
-        ).sort("round_number", 1)
-        rounds = await cursor.to_list(length=None)
-        return [row["human_pick_id"] for row in rounds if row.get("human_pick_id")]
+    async def _completed_pick_ids(self, db: AsyncSession, game_id: str) -> list[str]:
+        """Return all completed human picks for a game in round order."""
+        rows = (
+            (
+                await db.execute(
+                    select(GameRoundRecord)
+                    .where(and_(GameRoundRecord.game_id == game_id, GameRoundRecord.completed.is_(True)))
+                    .order_by(GameRoundRecord.round_number.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [row.human_pick_id for row in rows if row.human_pick_id]
 
     async def _current_selection_sequence(
         self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         game: dict[str, Any],
         include_product_id: str | None = None,
     ) -> list[str]:
+        """Return onboarding + completed picks, optionally including a pending pick."""
         picked = await self._completed_pick_ids(db, str(game["_id"]))
         sequence = list(game.get("onboarding_selected_ids", [])) + picked
         if include_product_id:
@@ -214,36 +215,17 @@ class GameService:
 
     async def _metrics_for_state(
         self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         model: PrefixCFModel,
         state: dict[str, Any],
         selected_ids: list[str],
+        category: str,
     ) -> dict[str, float]:
+        """Compute coherence and predicted prefix rating for selected products."""
         products = await self._get_products_by_ids(
             db,
             selected_ids,
-            projection={
-                "category": 1,
-                "vendor": 1,
-                "product_type": 1,
-                "tags": 1,
-                "options": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
+            projection=self._feature_projection(category),
         )
         vectors = [self.recommender.feature_space.vectorize(p) for p in products]
         coherence_score = model.coherence_score(vectors)
@@ -253,40 +235,34 @@ class GameService:
             "predicted_prefix_rating": float(predicted_prefix_rating),
         }
 
-    async def _all_products_for_scoring(
-        self,
-        db: AsyncIOMotorDatabase,
-        category: str,
-    ) -> list[dict[str, Any]]:
-        # Keep this projection minimal because this query runs for onboarding
-        # pool construction and every round's candidate ranking.
-        cursor = db.products.find(
-            self._category_product_filter(category),
-            {
-                "category": 1,
-                "title": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "product_type": 1,
-                "options": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
+    async def _all_products_for_scoring(self, db: AsyncSession, category: str) -> list[dict[str, Any]]:
+        """Load and cache all products for a category used in scoring/ranking."""
+        current_count = await db.scalar(
+            select(func.count()).select_from(ProductRecord).where(ProductRecord.category == category)
         )
-        return await cursor.to_list(length=None)
+        cached = self._scoring_catalog_cache.get(category)
+        if cached and cached.get("count") == int(current_count or 0):
+            return cached["products"]
+        rows = (await db.execute(select(ProductRecord).where(ProductRecord.category == category))).scalars().all()
+        products = [record_to_dict(row) for row in rows]
+        self._scoring_catalog_cache[category] = {
+            "count": int(current_count or 0),
+            "products": products,
+            "loaded_at": datetime.utcnow(),
+        }
+        return products
+
+    async def _all_products_for_onboarding_sample(self, db: AsyncSession, category: str) -> list[dict[str, Any]]:
+        """Load all products for onboarding sampling (no caching)."""
+        rows = (await db.execute(select(ProductRecord).where(ProductRecord.category == category))).scalars().all()
+        return [record_to_dict(row) for row in rows]
+
+    async def _warm_scoring_catalog(self, db: AsyncSession, category: str) -> None:
+        """Best-effort cache warmup to reduce first-round latency."""
+        try:
+            await self._all_products_for_scoring(db, category)
+        except Exception:
+            return
 
     def _diverse_onboarding_sample(
         self,
@@ -294,22 +270,40 @@ class GameService:
         game_id: str,
         category: str,
     ) -> list[str]:
+        """Create a deterministic, diverse 50-item onboarding pool."""
         if len(all_products) <= 50:
             return [str(p["_id"]) for p in all_products]
-
         rng = self._rng_for(game_id, 0, "onboarding")
         products = list(all_products)
         rng.shuffle(products)
+        profile = get_category_profile(category)
+        values_by_field: dict[str, list[float]] = {}
+        for field in profile.numeric_fields:
+            values: list[float] = []
+            for p in products:
+                raw = p.get(field)
+                try:
+                    if raw is not None:
+                        values.append(float(raw))
+                except (TypeError, ValueError):
+                    continue
+            if len(values) >= 10:
+                values_by_field[field] = values
 
-        numeric_field = "price_min" if category == "fountain_pens" else "popularity"
+        if not values_by_field:
+            # If a category has no usable numeric signal, keep deterministic sampling
+            # and return a shuffled subset rather than failing the game start flow.
+            return [str(p["_id"]) for p in products[:50]]
+
+        # Pick the numeric axis with highest spread so low/mid/high buckets are meaningful.
+        numeric_field = max(
+            values_by_field.keys(),
+            key=lambda field: max(values_by_field[field]) - min(values_by_field[field]),
+        )
         values = [float(p.get(numeric_field) or 0.0) for p in products]
-        if max(values, default=0.0) == 0.0 and category == "movies":
-            numeric_field = "release_year"
-            values = [float(p.get(numeric_field) or 0.0) for p in products]
         sorted_values = sorted(values)
         q1 = sorted_values[len(sorted_values) // 3]
         q2 = sorted_values[(2 * len(sorted_values)) // 3]
-
         low: list[dict[str, Any]] = []
         mid: list[dict[str, Any]] = []
         high: list[dict[str, Any]] = []
@@ -331,8 +325,8 @@ class GameService:
                 rng.shuffle(vendor_items)
             vendor_keys = list(by_vendor.keys())
             rng.shuffle(vendor_keys)
-
             picks: list[dict[str, Any]] = []
+            # Cycle vendor-by-vendor so one studio/brand does not dominate onboarding.
             while len(picks) < target and vendor_keys:
                 next_vendor_keys: list[str] = []
                 for vendor in vendor_keys:
@@ -348,12 +342,10 @@ class GameService:
 
         chosen = round_robin_pick(low, 17) + round_robin_pick(mid, 17) + round_robin_pick(high, 16)
         chosen_ids = {str(p["_id"]) for p in chosen}
-
         if len(chosen) < 50:
             remainder = [p for p in products if str(p["_id"]) not in chosen_ids]
             rng.shuffle(remainder)
             chosen.extend(remainder[: 50 - len(chosen)])
-
         chosen = chosen[:50]
         rng.shuffle(chosen)
         return [str(p["_id"]) for p in chosen]
@@ -364,7 +356,7 @@ class GameService:
         state: dict[str, Any],
         products: list[dict[str, Any]],
     ) -> list[tuple[float, dict[str, Any]]]:
-        # Hot path: score thousands of items per movie round.
+        """Score and rank products against current user preference state."""
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         feature_dim = len(model.feature_space.feature_index)
         if user_vec.size < feature_dim:
@@ -375,7 +367,6 @@ class GameService:
         bias = float(state.get("bias", 0.0))
         item_vectors = self.recommender.item_vectors
         item_norms = self.recommender.item_norms
-
         scored: list[tuple[float, dict[str, Any]]] = []
         for product in products:
             pid = str(product["_id"])
@@ -384,7 +375,6 @@ class GameService:
                 vec = self.recommender.feature_space.vectorize(product)
                 item_vectors[pid] = vec
                 item_norms[pid] = float(np.linalg.norm(vec))
-
             if user_norm <= 0:
                 similarity = 0.0
             else:
@@ -394,10 +384,8 @@ class GameService:
                     item_norms[pid] = item_norm
                 denom = user_norm * item_norm
                 similarity = float(np.dot(user_vec, vec) / denom) if denom > 0 else 0.0
-
-            score = 3.0 + 1.7 * similarity + bias
-            score = float(min(5.0, max(1.0, score)))
-            scored.append((float(score), product))
+            score = float(min(5.0, max(1.0, 3.0 + 1.7 * similarity + bias)))
+            scored.append((score, product))
         scored.sort(key=lambda item: (item[0], str(item[1]["_id"])), reverse=True)
         return scored
 
@@ -407,12 +395,12 @@ class GameService:
         round_number: int,
         scored: list[tuple[float, dict[str, Any]]],
     ) -> list[str]:
+        """Build a balanced 10-item candidate set from ranked products."""
         rng = self._rng_for(game_id, round_number, "round_candidates")
         if len(scored) <= 10:
             ids = [str(p["_id"]) for _, p in scored]
             rng.shuffle(ids)
             return ids
-
         selected_ids: list[str] = []
         selected_set: set[str] = set()
 
@@ -428,60 +416,29 @@ class GameService:
                 if len(selected_ids) >= target:
                     return
 
+        # Mix likely picks, borderline picks, and harder/distant picks to avoid
+        # overly easy rounds while still keeping AI-scorable candidates.
         likely = scored[:20]
         add_from_pool(likely, 6)
-
         near_boundary = scored[20:120] or scored[6:120]
         add_from_pool(near_boundary, 8)
-
         likely_vendors = {p.get("vendor") for _, p in scored[:10]}
         tail = scored[len(scored) // 2 :]
         diverse = [pair for pair in tail if pair[1].get("vendor") not in likely_vendors]
         if len(diverse) < 2:
             diverse = tail
         add_from_pool(diverse, 10)
-
         add_from_pool(scored, 10)
-
         selected_ids = selected_ids[:10]
         rng.shuffle(selected_ids)
         return selected_ids
 
-    async def _persist_learning_selection(
-        self,
-        db: AsyncIOMotorDatabase,
-        game: dict[str, Any],
-        product_id: str,
-        created_at: datetime | None = None,
-    ) -> None:
-        session_id = game.get("learning_session_id")
-        if not session_id:
-            return
-
-        stamp = created_at or datetime.utcnow()
-        selection_doc = {
-            "session_id": session_id,
-            "product_id": product_id,
-            "is_exception": False,
-            "created_at": stamp,
-        }
-        inserted = await db.selections.insert_one(selection_doc)
-        await db.sessions.update_one(
-            {"_id": ObjectId(session_id)},
-            {"$push": {"selections": str(inserted.inserted_id)}},
-        )
-
-    async def get_categories(self, db: AsyncIOMotorDatabase) -> list[dict[str, Any]]:
-        pipeline = [
-            {
-                "$group": {
-                    "_id": {"$ifNull": ["$category", "fountain_pens"]},
-                    "available_count": {"$sum": 1},
-                }
-            }
-        ]
-        counts = {row["_id"]: int(row["available_count"]) for row in await db.products.aggregate(pipeline).to_list(length=None)}
-
+    async def get_categories(self, db: AsyncSession) -> list[dict[str, Any]]:
+        """Return configured categories with currently available product counts."""
+        rows = (
+            await db.execute(select(ProductRecord.category, func.count(ProductRecord.id)).group_by(ProductRecord.category))
+        ).all()
+        counts = {str(category): int(count) for category, count in rows}
         results: list[dict[str, Any]] = []
         for category in supported_categories():
             copy = category_copy(category)
@@ -498,890 +455,197 @@ class GameService:
 
     async def create_game(
         self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         player_name: str,
         category: str = "fountain_pens",
         total_rounds: int = 5,
+        fresh_start: bool = False,
     ) -> dict[str, Any]:
+        """Create and persist a new game session for a player/category."""
         await self._ensure_indexes(db)
         model = await self._ensure_model(db)
         normalized_category = normalize_category(category)
-
         clean_name = player_name.strip()
         if not clean_name:
             raise ValueError("Player name is required")
-
-        user_doc = {
-            "name": f"{clean_name} (game)",
-            "sessions": [],
-            "created_at": datetime.utcnow(),
-        }
-        user_result = await db.users.insert_one(user_doc)
-        user_id = str(user_result.inserted_id)
-
-        session_doc = {
-            "user_id": user_id,
-            "state": model.init_state(),
-            "selections": [],
-            "prefix_ratings": [],
-            "created_at": datetime.utcnow(),
-        }
-        session_result = await db.sessions.insert_one(session_doc)
-        learning_session_id = str(session_result.inserted_id)
-
-        await db.users.update_one(
-            {"_id": user_result.inserted_id},
-            {"$push": {"sessions": learning_session_id}},
-        )
-
         now = datetime.utcnow()
-        game_doc = {
-            "schema_version": 2,
-            "player_name": clean_name,
-            "category": normalized_category,
-            "status": "onboarding",
-            "current_round": 0,
-            "total_rounds": total_rounds,
-            "human_score": 0,
-            "ai_score": 0,
-            "learning_user_id": user_id,
-            "learning_session_id": learning_session_id,
-            "model_state": model.init_state(),
-            "onboarding_pool_ids": [],
-            "onboarding_selected_ids": [],
-            "onboarding_rating": None,
-            "created_at": now,
-            "updated_at": now,
-        }
-
-        result = await db.games.insert_one(game_doc)
-        game = await db.games.find_one({"_id": result.inserted_id})
-        assert game is not None
-
-        return {
-            "id": str(game["_id"]),
-            "player_name": game["player_name"],
-            "category": normalized_category,
-            "status": game["status"],
-            "total_rounds": game["total_rounds"],
-            "human_score": game["human_score"],
-            "ai_score": game["ai_score"],
-            "created_at": game["created_at"],
-        }
-
-    async def get_onboarding(self, db: AsyncIOMotorDatabase, game_id: str) -> dict[str, Any]:
-        game = await self._get_game(db, game_id)
-        category = self._game_category(game)
-        if game.get("status") == "completed":
-            raise ValueError("Game is already completed")
-
-        pool_ids = game.get("onboarding_pool_ids") or []
-        if not pool_ids:
-            all_products = await self._all_products_for_scoring(db, category)
-            pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
-            await db.games.update_one(
-                {"_id": game["_id"]},
-                {"$set": {"onboarding_pool_ids": pool_ids, "updated_at": datetime.utcnow()}},
+        existing_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                )
             )
-
-        products = await self._get_products_by_ids(
-            db,
-            pool_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "directors": 1,
-            },
+            .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
+            .limit(1)
         )
-
-        return {
-            "game_id": game_id,
-            "category": category,
-            "category_copy": category_copy(category),
-            "pool_size": len(products),
-            "products": [self._product_card(p, category) for p in products],
-        }
-
-    async def submit_onboarding(
-        self,
-        db: AsyncIOMotorDatabase,
-        game_id: str,
-        selected_product_ids: list[str],
-        rating: int,
-    ) -> dict[str, Any]:
-        game = await self._get_game(db, game_id)
-        model = await self._ensure_model(db)
-        category = self._game_category(game)
-
-        if game.get("onboarding_selected_ids"):
-            raise ValueError("Onboarding already submitted for this game")
-
-        if len(selected_product_ids) != 10:
-            raise ValueError("You must select exactly 10 products")
-        if len(set(selected_product_ids)) != 10:
-            raise ValueError("Duplicate products are not allowed")
-
-        pool_ids = set(game.get("onboarding_pool_ids", []))
-        if not pool_ids:
-            raise ValueError("Onboarding pool is not initialized")
-        if any(pid not in pool_ids for pid in selected_product_ids):
-            raise ValueError("Selections must come from the onboarding pool")
-
-        selected_products = await self._get_products_by_ids(
-            db,
-            selected_product_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "product_type": 1,
-                "options": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
-        )
-        if len(selected_products) != 10:
-            raise ValueError("One or more selected products were not found")
-
-        state = game.get("model_state") or model.init_state()
-        self._align_state_to_feature_space(model, state)
-        for product in selected_products:
-            model.update_with_selection(state, product, is_exception=False)
-        model.update_with_prefix_rating(state, rating)
-
-        metrics = await self._metrics_for_state(db, model, state, selected_product_ids)
-
-        base_time = datetime.utcnow()
-        for index, product_id in enumerate(selected_product_ids):
-            stamp = base_time + timedelta(milliseconds=index)
-            await self._persist_learning_selection(db, game, product_id, stamp)
-
-        prefix_rating_doc = {
-            "session_id": game["learning_session_id"],
-            "rating": int(rating),
-            "tags": [],
-            "created_at": base_time + timedelta(milliseconds=1000),
-        }
-        rating_inserted = await db.prefix_ratings.insert_one(prefix_rating_doc)
-        await db.sessions.update_one(
-            {"_id": ObjectId(game["learning_session_id"])},
-            {
-                "$set": {"state": state},
-                "$push": {"prefix_ratings": str(rating_inserted.inserted_id)},
-            },
-        )
-
-        await db.games.update_one(
-            {"_id": game["_id"]},
-            {
-                "$set": {
-                    "status": "ready",
-                    "category": category,
-                    "model_state": state,
-                    "onboarding_selected_ids": selected_product_ids,
-                    "onboarding_rating": int(rating),
-                    "updated_at": datetime.utcnow(),
+        if existing_game is not None:
+            if fresh_start:
+                await db.execute(delete(GameRoundRecord).where(GameRoundRecord.game_id == existing_game.id))
+                await db.execute(delete(PrefixRatingRecord).where(PrefixRatingRecord.session_id == existing_game.id))
+                existing_game.status = "onboarding"
+                existing_game.current_round = 0
+                existing_game.total_rounds = total_rounds
+                existing_game.human_score = 0
+                existing_game.ai_score = 0
+                existing_game.model_state = model.init_state()
+                existing_game.onboarding_pool_ids = []
+                existing_game.onboarding_selected_ids = []
+                existing_game.onboarding_rating = None
+                existing_game.updated_at = now
+                await db.commit()
+                await db.refresh(existing_game)
+                return {
+                    "id": existing_game.id,
+                    "player_name": existing_game.player_name,
+                    "category": normalized_category,
+                    "status": existing_game.status,
+                    "total_rounds": int(existing_game.total_rounds or total_rounds),
+                    "human_score": int(existing_game.human_score or 0),
+                    "ai_score": int(existing_game.ai_score or 0),
+                    "created_at": existing_game.created_at,
+                    "resumed": False,
                 }
-            },
-        )
 
-        return {
-            "accepted": True,
-            "coherence_score": metrics["coherence_score"],
-            "predicted_prefix_rating": metrics["predicted_prefix_rating"],
-            "next_round": 1,
-        }
+            if existing_game.status in {"onboarding", "ready", "playing"}:
+                return {
+                    "id": existing_game.id,
+                    "player_name": existing_game.player_name,
+                    "category": normalized_category,
+                    "status": existing_game.status,
+                    "total_rounds": int(existing_game.total_rounds or total_rounds),
+                    "human_score": int(existing_game.human_score or 0),
+                    "ai_score": int(existing_game.ai_score or 0),
+                    "created_at": existing_game.created_at,
+                    "resumed": True,
+                }
 
-    async def start_round(self, db: AsyncIOMotorDatabase, game_id: str) -> dict[str, Any]:
-        game = await self._get_game(db, game_id)
-        model = await self._ensure_model(db)
-        category = self._game_category(game)
-
-        if len(game.get("onboarding_selected_ids", [])) != 10:
-            raise ValueError("Onboarding is incomplete")
-        if game["current_round"] >= game["total_rounds"]:
-            raise ValueError("Game is complete")
-
-        round_number = game["current_round"] + 1
-        existing = await db.game_rounds.find_one(
-            {"game_id": game["_id"], "round_number": round_number}
-        )
-
-        if existing and not existing.get("completed", False):
-            products = await self._get_products_by_ids(
-                db,
-                existing.get("candidate_ids", []),
-                projection={
-                    "title": 1,
-                    "category": 1,
-                    "vendor": 1,
-                    "price_min": 1,
-                    "price_max": 1,
-                    "tags": 1,
-                    "images": 1,
-                    "release_year": 1,
-                    "runtime_minutes": 1,
-                    "vote_average": 1,
-                    "directors": 1,
-                },
+            can_carry_profile = bool(
+                isinstance(existing_game.model_state, dict) and len(existing_game.onboarding_selected_ids or []) == 10
             )
+            if can_carry_profile:
+                existing_game.status = "ready"
+                existing_game.total_rounds = int(existing_game.total_rounds or 0) + int(total_rounds)
+            else:
+                existing_game.status = "onboarding"
+                existing_game.current_round = 0
+                existing_game.total_rounds = total_rounds
+                existing_game.human_score = 0
+                existing_game.ai_score = 0
+                existing_game.model_state = model.init_state()
+                existing_game.onboarding_pool_ids = []
+                existing_game.onboarding_selected_ids = []
+                existing_game.onboarding_rating = None
+            existing_game.updated_at = now
+            await db.commit()
+            await db.refresh(existing_game)
             return {
-                "round_number": round_number,
-                "category": category,
-                "category_copy": category_copy(category),
-                "candidates": [self._product_card(p, category) for p in products],
-                "pre_round_metrics": existing.get("pre_metrics", {"coherence_score": 0.0, "predicted_prefix_rating": 3.0}),
+                "id": existing_game.id,
+                "player_name": existing_game.player_name,
+                "category": normalized_category,
+                "status": existing_game.status,
+                "total_rounds": int(existing_game.total_rounds or total_rounds),
+                "human_score": int(existing_game.human_score or 0),
+                "ai_score": int(existing_game.ai_score or 0),
+                "created_at": existing_game.created_at,
+                "resumed": True,
             }
 
-        state = game.get("model_state") or model.init_state()
-        if self._align_state_to_feature_space(model, state):
-            await db.games.update_one(
-                {"_id": game["_id"]},
-                {"$set": {"model_state": state, "updated_at": datetime.utcnow()}},
-            )
-        selected_ids = await self._current_selection_sequence(db, game)
-        used = set(selected_ids)
-
-        all_products = await self._all_products_for_scoring(db, category)
-        candidates_source = [p for p in all_products if str(p["_id"]) not in used]
-        if len(candidates_source) < 10:
-            raise ValueError("Not enough products left to generate a round")
-
-        scored = self._rank_candidates(model, state, candidates_source)
-        candidate_ids = self._build_round_candidates(game_id, round_number, scored)
-        candidate_products = await self._get_products_by_ids(
-            db,
-            candidate_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "directors": 1,
-            },
+        game = GameRecord(
+            schema_version=2,
+            player_name=clean_name,
+            category=normalized_category,
+            status="onboarding",
+            current_round=0,
+            total_rounds=total_rounds,
+            human_score=0,
+            ai_score=0,
+            model_state=model.init_state(),
+            onboarding_pool_ids=[],
+            onboarding_selected_ids=[],
+            onboarding_rating=None,
+            created_at=now,
+            updated_at=now,
         )
-
-        pre_metrics = await self._metrics_for_state(db, model, state, selected_ids)
-
-        round_doc = {
-            "schema_version": 2,
-            "category": category,
-            "game_id": game["_id"],
-            "round_number": round_number,
-            "candidate_ids": candidate_ids,
-            "pre_metrics": pre_metrics,
-            "completed": False,
-            "created_at": datetime.utcnow(),
-        }
-        await db.game_rounds.update_one(
-            {"game_id": game["_id"], "round_number": round_number},
-            {"$setOnInsert": round_doc},
-            upsert=True,
-        )
-
-        await db.games.update_one(
-            {"_id": game["_id"]},
-            {"$set": {"status": "playing", "updated_at": datetime.utcnow()}},
-        )
-
+        db.add(game)
+        await db.commit()
+        await db.refresh(game)
         return {
-            "round_number": round_number,
-            "category": category,
-            "category_copy": category_copy(category),
-            "candidates": [self._product_card(p, category) for p in candidate_products],
-            "pre_round_metrics": pre_metrics,
+            "id": game.id,
+            "player_name": game.player_name,
+            "category": normalized_category,
+            "status": game.status,
+            "total_rounds": game.total_rounds,
+            "human_score": game.human_score,
+            "ai_score": game.ai_score,
+            "created_at": game.created_at,
+            "resumed": False,
         }
 
-    async def submit_pick(
+    async def get_resume_state(
         self,
-        db: AsyncIOMotorDatabase,
-        game_id: str,
-        round_number: int,
-        product_id: str,
-    ) -> dict[str, Any]:
-        game = await self._get_game(db, game_id)
-        model = await self._ensure_model(db)
-        category = self._game_category(game)
-        profile = get_category_profile(category)
-
-        if game["current_round"] >= game["total_rounds"]:
-            raise ValueError("Game is already complete")
-        if round_number != game["current_round"] + 1:
-            raise ValueError("Invalid round number for current game state")
-        if not ObjectId.is_valid(product_id):
-            raise ValueError("Invalid product ID")
-
-        round_doc = await db.game_rounds.find_one(
-            {"game_id": game["_id"], "round_number": round_number}
-        )
-        if round_doc is None:
-            raise ValueError("Round has not been started")
-        if round_doc.get("completed", False):
-            raise ValueError("Round has already been completed")
-
-        candidate_ids = round_doc.get("candidate_ids", [])
-        if product_id not in candidate_ids:
-            raise ValueError("Selected product is not in this round's candidate set")
-
-        candidate_products = await self._get_products_by_ids(
-            db,
-            candidate_ids,
-            projection={
-                "title": 1,
-                "category": 1,
-                "vendor": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "tags": 1,
-                "images": 1,
-                "product_type": 1,
-                "options": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
-        )
-        by_id = {str(p["_id"]): p for p in candidate_products}
-        if product_id not in by_id:
-            raise ValueError("Selected product does not exist")
-
-        state = game.get("model_state") or model.init_state()
-        self._align_state_to_feature_space(model, state)
-        item_vectors = self.recommender.item_vectors
-        item_norms = self.recommender.item_norms
-        user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
-        user_norm = float(np.linalg.norm(user_vec))
-        bias = float(state.get("bias", 0.0))
-        scored = []
-        for item in candidate_products:
-            pid = str(item["_id"])
-            vec = item_vectors.get(pid)
-            if vec is None:
-                vec = self.recommender.feature_space.vectorize(item)
-                item_vectors[pid] = vec
-                item_norms[pid] = float(np.linalg.norm(vec))
-
-            if user_norm <= 0:
-                similarity = 0.0
-            else:
-                item_norm = item_norms.get(pid)
-                if item_norm is None:
-                    item_norm = float(np.linalg.norm(vec))
-                    item_norms[pid] = item_norm
-                denom = user_norm * item_norm
-                similarity = float(np.dot(user_vec, vec) / denom) if denom > 0 else 0.0
-
-            score = 3.0 + 1.7 * similarity + bias
-            score = float(min(5.0, max(1.0, score)))
-            scored.append((float(score), item))
-        scored.sort(key=lambda item: (item[0], str(item[1]["_id"])), reverse=True)
-
-        ai_score, ai_pick_product = scored[0]
-        ai_pick_id = str(ai_pick_product["_id"])
-        ai_top3_ids = [str(p["_id"]) for _, p in scored[:3]]
-        ai_correct = product_id in ai_top3_ids
-        ai_exact = ai_pick_id == product_id
-        human_points = 0 if ai_correct else 10
-        ai_points = 10 if ai_correct else 0
-        ai_rank_of_pick = next(
-            (i + 1 for i, (_, p) in enumerate(scored) if str(p["_id"]) == product_id),
-            len(scored),
-        )
-
-        human_pick_product = by_id[product_id]
-        model.update_with_selection(state, human_pick_product, is_exception=False)
-
-        await self._persist_learning_selection(db, game, product_id)
-        await db.sessions.update_one(
-            {"_id": ObjectId(game["learning_session_id"])},
-            {"$set": {"state": state}},
-        )
-
-        selected_ids = await self._current_selection_sequence(db, game, include_product_id=product_id)
-        post_metrics = await self._metrics_for_state(db, model, state, selected_ids)
-
-        top_candidates = []
-        for score, product in scored[:5]:
-            card = self._product_card(product, category)
-            card["score"] = float(score)
-            top_candidates.append(card)
-
-        # Build feature-level explanation
-        human_vec = self.recommender.feature_space.vectorize(human_pick_product)
-        ai_vec = self.recommender.feature_space.vectorize(ai_pick_product)
-        user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
-
-        # Identify what features the user profile has learned to prefer
-        inv_index = {v: k for k, v in self.recommender.feature_space.feature_index.items()}
-        feature_weights = []
-        for idx in range(len(user_vec)):
-            w = float(user_vec[idx])
-            if abs(w) > 0.05:
-                fname = inv_index.get(idx, f"feature_{idx}")
-                if "::num::" in fname:
-                    feature_weights.append((numeric_preference_label(fname, w), abs(w)))
-                else:
-                    feature_weights.append((fname, w))
-        feature_weights.sort(key=lambda x: abs(x[1]), reverse=True)
-        top_positive = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w > 0][:8])
-        top_negative = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w < 0][:5])
-
-        # Human pick features
-        human_features = [inv_index.get(i, f"f{i}") for i in range(len(human_vec)) if human_vec[i] > 0]
-        ai_features = [inv_index.get(i, f"f{i}") for i in range(len(ai_vec)) if ai_vec[i] > 0]
-        shared_raw = list(set(human_features) & set(ai_features))
-        shared_features = [h for h in (humanize_feature(f) for f in shared_raw) if h is not None]
-
-        # ── Hidden preference detection ──────────────────────────
-        all_selected_ids = await self._current_selection_sequence(
-            db, game, include_product_id=product_id
-        )
-        all_selected_products = await self._get_products_by_ids(
-            db,
-            all_selected_ids,
-            projection={
-                "category": 1,
-                "vendor": 1,
-                "product_type": 1,
-                "tags": 1,
-                "options": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
-        )
-        hidden_raw = model.detect_hidden_preferences(state, all_selected_products)
-        hidden_prefs = humanize_feature_list(
-            [(h["feature"], round(h["latency"], 3)) for h in hidden_raw]
-        )
-        # Generate human-readable hints
-        hidden_hints: list[str] = []
-        for h in hidden_raw[:2]:
-            label = humanize_feature(h["feature"])
-            if label:
-                hidden_hints.append(
-                    f"The AI notices a hidden pattern: your picks tend to share \"{label}\" "
-                    f"even though you may not have targeted it."
-                )
-
-        if ai_correct:
-            if ai_exact:
-                reason = (
-                    f"The AI predicted your exact {profile.item_singular}! "
-                    f"It ranked this title #1 out of {len(candidate_products)} candidates based on your preference profile."
-                )
-            else:
-                match_rank = ai_top3_ids.index(product_id) + 1
-                reason = (
-                    f"Your pick was the AI's #{match_rank} prediction. "
-                    f"The AI successfully identified your choice within its top 3 candidates."
-                )
-        else:
-            reason = (
-                f"Your pick ranked #{ai_rank_of_pick} in the AI's predictions. "
-                f"The model's top pick was '{ai_pick_product.get('title', 'Unknown')}', "
-                f"which scored {ai_score:.2f} based on feature similarity to your profile."
-            )
-
-        await db.game_rounds.update_one(
-            {"_id": round_doc["_id"]},
-            {
-                "$set": {
-                    "schema_version": 2,
-                    "human_pick_id": product_id,
-                    "ai_pick_id": ai_pick_id,
-                    "ai_confidence": float(ai_score),
-                    "ai_top_k": [
-                        {"product_id": str(product["_id"]), "score": float(score)}
-                        for score, product in scored[:5]
-                    ],
-                    "ai_top3_ids": ai_top3_ids,
-                    "ai_rank_of_pick": ai_rank_of_pick,
-                    "ai_correct": ai_correct,
-                    "human_points": human_points,
-                    "ai_points": ai_points,
-                    "post_metrics": post_metrics,
-                    "completed": True,
-                    "completed_at": datetime.utcnow(),
-                }
-            },
-        )
-
-        new_current_round = game["current_round"] + 1
-        new_human_total = game["human_score"] + human_points
-        new_ai_total = game["ai_score"] + ai_points
-        game_complete = new_current_round >= game["total_rounds"]
-
-        await db.games.update_one(
-            {"_id": game["_id"]},
-            {
-                "$set": {
-                    "current_round": new_current_round,
-                    "human_score": new_human_total,
-                    "ai_score": new_ai_total,
-                    "status": "completed" if game_complete else "playing",
-                    "model_state": state,
-                    "updated_at": datetime.utcnow(),
-                }
-            },
-        )
-
-        return {
-            "round_number": round_number,
-            "category": category,
-            "category_copy": category_copy(category),
-            "human_pick": self._product_card(human_pick_product, category),
-            "ai_pick": {
-                **self._product_card(ai_pick_product, category),
-                "score": float(ai_score),
-            },
-            "ai_correct": ai_correct,
-            "ai_exact": ai_exact,
-            "ai_rank_of_pick": ai_rank_of_pick,
-            "ai_top3_ids": ai_top3_ids,
-            "human_points": human_points,
-            "ai_points": ai_points,
-            "total_human_score": new_human_total,
-            "total_ai_score": new_ai_total,
-            "ai_explanation": {
-                "reason": reason,
-                "top_candidates": top_candidates,
-                "learned_preferences": top_positive,
-                "learned_dislikes": top_negative,
-                "shared_features": shared_features[:6],
-                "hidden_preferences": hidden_prefs,
-                "hidden_preference_hints": hidden_hints,
-            },
-            "post_round_metrics": post_metrics,
-            "game_complete": game_complete,
-        }
-
-    async def get_game_summary(
-        self,
-        db: AsyncIOMotorDatabase,
-        game_id: str,
-    ) -> dict[str, Any]:
-        """Return post-game insights: round-by-round stats, learned profile, top-5 recs."""
-        game = await self._get_game(db, game_id)
-        model = await self._ensure_model(db)
-        category = self._game_category(game)
-        profile = get_category_profile(category)
-
-        if game.get("status") != "completed":
-            raise ValueError("Game is not yet completed")
-
-        # Load all rounds
-        cursor = db.game_rounds.find(
-            {"game_id": game["_id"], "completed": True}
-        ).sort("round_number", 1)
-        rounds = await cursor.to_list(length=None)
-
-        # Round-by-round data for charts
-        round_stats = []
-        cumulative_ai = 0
-        cumulative_human = 0
-        for rnd in rounds:
-            ai_correct = rnd.get("ai_correct", False)
-            cumulative_ai += rnd.get("ai_points", 0)
-            cumulative_human += rnd.get("human_points", 0)
-            post = rnd.get("post_metrics", {})
-            round_stats.append({
-                "round_number": rnd["round_number"],
-                "ai_correct": ai_correct,
-                "ai_rank_of_pick": rnd.get("ai_rank_of_pick", None),
-                "ai_confidence": rnd.get("ai_confidence", 0),
-                "coherence": post.get("coherence_score", 0),
-                "predicted_rating": post.get("predicted_prefix_rating", 3.0),
-                "cumulative_ai": cumulative_ai,
-                "cumulative_human": cumulative_human,
-            })
-
-        # Model's learned preferences from the final state
-        state = game.get("model_state") or model.init_state()
-        if self._align_state_to_feature_space(model, state):
-            await db.games.update_one(
-                {"_id": game["_id"]},
-                {"$set": {"model_state": state, "updated_at": datetime.utcnow()}},
-            )
-        user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
-        inv_index = {v: k for k, v in self.recommender.feature_space.feature_index.items()}
-
-        feature_weights = []
-        for idx in range(len(user_vec)):
-            w = float(user_vec[idx])
-            if abs(w) > 0.05:
-                fname = inv_index.get(idx, f"feature_{idx}")
-                if "::num::" in fname:
-                    feature_weights.append((numeric_preference_label(fname, w), abs(w)))
-                else:
-                    feature_weights.append((fname, w))
-        feature_weights.sort(key=lambda x: abs(x[1]), reverse=True)
-
-        learned_likes = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w > 0][:10])
-        learned_dislikes = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w < 0][:5])
-
-        # Top-5 recommended products from the full catalog
-        all_products = await self._all_products_for_scoring(db, category)
-        scored = self._rank_candidates(model, state, all_products)
-        top5_recs = []
-        for score, product in scored[:5]:
-            card = self._product_card(product, category)
-            card["score"] = float(score)
-            top5_recs.append(card)
-        top5_ids = {r["id"] for r in top5_recs}
-
-        # ── Hidden preference discovery (final) ─────────────────
-        all_selected_ids = await self._current_selection_sequence(db, game)
-        all_selected_products = await self._get_products_by_ids(
-            db,
-            all_selected_ids,
-            projection={
-                "category": 1,
-                "vendor": 1,
-                "product_type": 1,
-                "tags": 1,
-                "options": 1,
-                "price_min": 1,
-                "price_max": 1,
-                "release_year": 1,
-                "runtime_minutes": 1,
-                "vote_average": 1,
-                "popularity": 1,
-                "original_language": 1,
-                "certification": 1,
-                "primary_country": 1,
-                "decade_bucket": 1,
-                "runtime_bucket": 1,
-                "genres": 1,
-                "keywords": 1,
-                "production_companies": 1,
-                "directors": 1,
-            },
-        )
-        hidden_raw = model.detect_hidden_preferences(state, all_selected_products)
-        hidden_prefs = humanize_feature_list(
-            [(h["feature"], round(h["latency"], 3)) for h in hidden_raw]
-        )
-
-        # Remove hidden prefs that already appear in learned_likes
-        learned_names = {name.lower() for name, _ in learned_likes}
-        hidden_prefs = [
-            (n, w) for n, w in hidden_prefs
-            if n.lower() not in learned_names
-        ]
-
-        # Hidden gem products — pens the user didn't see but match latent tastes
-        # Exclude any products already in the top-5 recommendations
-        hidden_gem_results = model.get_hidden_gem_products(
-            state, all_selected_products, all_products, top_n=10
-        )
-        hidden_gems_cards = []
-        for gem_score, gem_product, matched_features in hidden_gem_results:
-            pid = str(gem_product["_id"])
-            if pid in top5_ids:
-                continue
-            card = self._product_card(gem_product, category)
-            card["score"] = round(float(gem_score), 3)
-            hidden_gems_cards.append(card)
-            if len(hidden_gems_cards) >= 5:
-                break
-
-        # Build narrative explanation
-        hidden_gems_explanation = ""
-        if hidden_prefs:
-            feature_names = [name for name, _ in hidden_prefs[:3]]
-            if len(feature_names) == 1:
-                hidden_gems_explanation = (
-                    f"Although you may not have noticed, your choices reveal a hidden "
-                    f"affinity for \"{feature_names[0]}\". The {profile.item_plural} below match this "
-                    f"latent pattern the AI discovered in your selections."
-                )
-            else:
-                joined = ", ".join(f'\"{n}\"' for n in feature_names[:-1])
-                joined += f' and \"{feature_names[-1]}\"'
-                hidden_gems_explanation = (
-                    f"Your choices reveal hidden patterns the AI detected: {joined}. "
-                    f"These features appeared across your selections even though you "
-                    f"likely weren't targeting them. The {profile.item_plural} below match these "
-                    f"latent preferences."
-                )
-
-        # Accuracy summary
-        total = len(rounds)
-        correct = sum(1 for r in rounds if r.get("ai_correct"))
-        exact = sum(1 for r in rounds if r.get("ai_pick_id") == r.get("human_pick_id"))
-
-        return {
-            "game_id": str(game["_id"]),
-            "player_name": game["player_name"],
-            "category": category,
-            "category_copy": category_copy(category),
-            "total_rounds": total,
-            "human_score": game["human_score"],
-            "ai_score": game["ai_score"],
-            "accuracy": {
-                "top3_correct": correct,
-                "exact_correct": exact,
-                "top3_rate": correct / total if total else 0,
-                "exact_rate": exact / total if total else 0,
-            },
-            "round_stats": round_stats,
-            "learned_preferences": learned_likes,
-            "learned_dislikes": learned_dislikes,
-            "top5_recommendations": top5_recs,
-            "hidden_preferences": hidden_prefs,
-            "hidden_gems_products": hidden_gems_cards,
-            "hidden_gems_explanation": hidden_gems_explanation,
-        }
-
-    async def get_game_status(
-        self,
-        db: AsyncIOMotorDatabase,
-        game_id: str,
-    ) -> dict[str, Any]:
-        game = await self._get_game(db, game_id)
-        category = self._game_category(game)
-
-        active_round = await db.game_rounds.find_one(
-            {"game_id": game["_id"], "completed": False},
-            {"round_number": 1},
-            sort=[("round_number", 1)],
-        )
-
-        return {
-            "id": str(game["_id"]),
-            "player_name": game["player_name"],
-            "category": category,
-            "category_copy": category_copy(category),
-            "status": game["status"],
-            "current_round": int(game.get("current_round", 0)),
-            "total_rounds": int(game.get("total_rounds", 10)),
-            "human_score": int(game.get("human_score", 0)),
-            "ai_score": int(game.get("ai_score", 0)),
-            "onboarding_complete": len(game.get("onboarding_selected_ids", [])) == 10,
-            "onboarding_selected_count": len(game.get("onboarding_selected_ids", [])),
-            "round_in_progress": active_round.get("round_number") if active_round else None,
-        }
-
-    async def get_leaderboard(
-        self,
-        db: AsyncIOMotorDatabase,
-        limit: int = 10,
-        category: str = "fountain_pens",
-    ) -> list[dict[str, Any]]:
-        normalized_category = normalize_category(category)
-        pipeline = [
-            {"$match": {"status": "completed", **self._category_query(normalized_category)}},
-            {"$addFields": {"score_difference": {"$subtract": ["$human_score", "$ai_score"]}}},
-            {"$sort": {"score_difference": -1, "human_score": -1, "created_at": 1}},
-            {"$limit": int(limit)},
-        ]
-        games = await db.games.aggregate(pipeline).to_list(length=limit)
-
-        return [
-            {
-                "rank": index + 1,
-                "player_name": game["player_name"],
-                "category": self._game_category(game),
-                "human_score": int(game["human_score"]),
-                "ai_score": int(game["ai_score"]),
-                "score_difference": int(game["human_score"] - game["ai_score"]),
-                "rounds_completed": int(game.get("current_round", 0)),
-                "created_at": game["created_at"],
-            }
-            for index, game in enumerate(games)
-        ]
-
-    async def get_player_history(
-        self,
-        db: AsyncIOMotorDatabase,
+        db: AsyncSession,
         player_name: str,
-        limit: int = 20,
         category: str = "fountain_pens",
-    ) -> list[dict[str, Any]]:
-        """Return completed games for a given player, most recent first."""
+    ) -> dict[str, Any]:
+        """Return whether a resumable game exists for player+category."""
         normalized_category = normalize_category(category)
-        cursor = db.games.find(
-            {"player_name": player_name, "status": "completed", **self._category_query(normalized_category)},
-        ).sort("created_at", -1).limit(limit)
-        games = await cursor.to_list(length=limit)
-
-        results: list[dict[str, Any]] = []
-        for game in games:
-            game_id = str(game["_id"])
-            total = int(game.get("current_round", 0))
-            h = int(game.get("human_score", 0))
-            a = int(game.get("ai_score", 0))
-
-            # Count AI correct rounds
-            ai_correct = await db.game_rounds.count_documents(
-                {"game_id": game["_id"], "completed": True, "ai_correct": True}
+        clean_name = player_name.strip()
+        if not clean_name:
+            return {
+                "exists": False,
+                "can_start_fresh": False,
+                "game_id": None,
+                "player_name": None,
+                "category": normalized_category,
+                "status": None,
+                "current_round": None,
+                "total_rounds": None,
+            }
+        any_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                )
             )
-
-            results.append({
-                "game_id": game_id,
-                "player_name": player_name,
-                "category": self._game_category(game),
-                "human_score": h,
-                "ai_score": a,
-                "score_difference": h - a,
-                "rounds_played": total,
-                "ai_accuracy": ai_correct / total if total else 0,
-                "created_at": game["created_at"],
-            })
-
-        return results
+            .limit(1)
+        )
+        active_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                    GameRecord.status.in_(["onboarding", "ready", "playing"]),
+                )
+            )
+            .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
+            .limit(1)
+        )
+        if active_game is None:
+            return {
+                "exists": False,
+                "can_start_fresh": any_game is not None,
+                "game_id": None,
+                "player_name": clean_name,
+                "category": normalized_category,
+                "status": None,
+                "current_round": None,
+                "total_rounds": None,
+            }
+        return {
+            "exists": True,
+            "can_start_fresh": True,
+            "game_id": active_game.id,
+            "player_name": active_game.player_name,
+            "category": normalized_category,
+            "status": active_game.status,
+            "current_round": int(active_game.current_round or 0),
+            "total_rounds": int(active_game.total_rounds or 0),
+        }
 
 
 game_service = GameService()

@@ -1,37 +1,51 @@
+"""FastAPI application entrypoint for Decidio backend."""
+
 from __future__ import annotations
 
-import json
+import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
+from sqlalchemy import Float, and_, cast, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db import Base, engine, get_db, SessionLocal
-from .models import Product, ProductImage, User, Session as UserSession, Selection, PrefixRating
-from .schemas import (
-    ProductOut,
-    ProductImageOut,
-    UserCreate,
-    UserOut,
-    SessionCreate,
-    SessionOut,
-    SelectionCreate,
-    PrefixRatingCreate,
-    RecommendationOut,
+from .category_profiles import normalize_category
+from .db import (
+    ProductRecord,
+    close_db,
+    get_db,
+    init_db,
+    record_to_dict,
+    verify_connection,
 )
+from .models import Product, ProductOut, UserCreate, UserOut
+from .routes.auth import router as auth_router
+from .routes.game import router as game_router
 from .services.recommender import recommender
+from .services.schema_service import ensure_multicategory_compatibility
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
 
-app = FastAPI(title="Decidio Prototype")
+app = FastAPI(title="Decidio Prototype (Postgres)")
+
+# CORS configuration: allow Render production and local development
+allowed_origins = [
+    "https://recommendle-frontend.onrender.com",  # Production
+    "http://localhost:5173",  # Local frontend (Vite dev server)
+    "http://127.0.0.1:5173",  # Local frontend alternative
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,150 +53,83 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
-    with SessionLocal() as db:
-        recommender.refresh(db)
+async def on_startup():
+    """Initialize the recommender on startup and verify Postgres connection."""
+    await init_db()
+    is_connected = await verify_connection()
+    if not is_connected:
+        logger.warning("Postgres connection verification failed, but proceeding with startup")
+
+    db_gen = get_db()
+    db = await anext(db_gen)
+    await ensure_multicategory_compatibility(db)
+    await recommender.refresh(db)
+    await db_gen.aclose()
+    logger.info("Application startup completed")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Close Postgres connection on shutdown."""
+    await close_db()
 
 
 @app.get("/api/products", response_model=list[ProductOut])
-def list_products(
+async def list_products(
     q: Optional[str] = None,
     vendor: Optional[str] = None,
+    category: Optional[str] = None,
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    query = db.query(Product)
+    """List products with optional filtering."""
+    filters = []
     if q:
-        q_like = f"%{q.lower()}%"
-        query = query.filter(Product.title.ilike(q_like))
+        filters.append(ProductRecord.data["title"].as_string().ilike(f"%{q}%"))
     if vendor:
-        query = query.filter(Product.vendor.ilike(f"%{vendor}%"))
+        filters.append(ProductRecord.data["vendor"].as_string().ilike(f"%{vendor}%"))
+    if category:
+        try:
+            normalized = normalize_category(category)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        filters.append(ProductRecord.category == normalized)
     if price_min is not None:
-        query = query.filter(Product.price_min >= price_min)
+        filters.append(cast(ProductRecord.data["price_min"].as_string(), Float) >= price_min)
     if price_max is not None:
-        query = query.filter(Product.price_max <= price_max)
-    products = query.offset(offset).limit(limit).all()
-    return [to_product_out(p) for p in products]
+        filters.append(cast(ProductRecord.data["price_max"].as_string(), Float) <= price_max)
+
+    stmt = select(ProductRecord).offset(offset).limit(limit)
+    if filters:
+        stmt = stmt.where(and_(*filters))
+    result = await db.execute(stmt)
+    products = [record_to_dict(row) for row in result.scalars().all()]
+    return [ProductOut.from_record(Product(**p)) for p in products]
 
 
 @app.get("/api/products/{product_id}", response_model=ProductOut)
-def get_product(product_id: int, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
+    """Get a specific product by ID."""
+    result = await db.execute(select(ProductRecord).where(ProductRecord.id == product_id))
+    row = result.scalar_one_or_none()
+    product = record_to_dict(row) if row else None
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return to_product_out(product)
+    return ProductOut.from_record(Product(**product))
 
 
-@app.post("/api/users", response_model=UserOut)
-def create_user(payload: UserCreate, db: Session = Depends(get_db)):
-    user = User(name=payload.name)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return UserOut(id=user.id, name=user.name)
+# Include game routes
+app.include_router(game_router)
+
+# Include auth routes
+app.include_router(auth_router)
 
 
-@app.post("/api/sessions", response_model=SessionOut)
-def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == payload.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    session = UserSession(user_id=user.id)
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    return SessionOut(id=session.id, user_id=session.user_id, created_at=session.created_at)
-
-
-@app.post("/api/sessions/{session_id}/end")
-def end_session(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(UserSession).filter(UserSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    session.state_json = None
-    db.commit()
-    return {"status": "ended", "session_id": session_id}
-
-
-@app.post("/api/sessions/{session_id}/select")
-def select_product(session_id: int, payload: SelectionCreate, db: Session = Depends(get_db)):
-    session = db.query(UserSession).filter(UserSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    product = db.query(Product).filter(Product.id == payload.product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    selection = Selection(session_id=session.id, product_id=product.id, is_exception=payload.is_exception)
-    db.add(selection)
-    recommender.update_with_selection(session, product, payload.is_exception)
-    db.commit()
-    return {"status": "ok"}
-
-
-@app.post("/api/sessions/{session_id}/rate")
-def rate_prefix(session_id: int, payload: PrefixRatingCreate, db: Session = Depends(get_db)):
-    session = db.query(UserSession).filter(UserSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    rating = PrefixRating(session_id=session.id, rating=payload.rating, tags_json=json.dumps(payload.tags))
-    db.add(rating)
-    recommender.update_with_prefix_rating(session, payload.rating)
-    db.commit()
-    return {"status": "ok"}
-
-
-@app.get("/api/sessions/{session_id}/recommendations", response_model=RecommendationOut)
-def recommend(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(UserSession).filter(UserSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    result = recommender.recommend(db, session)
-    return RecommendationOut(
-        strong=[to_product_out(p) for p in result["strong"]],
-        wildcard=to_product_out(result["wildcard"]) if result["wildcard"] else None,
-        coherence_score=result["coherence_score"],
-        predicted_prefix_rating=result["predicted_prefix_rating"],
-    )
-
-
-@app.get("/api/sessions/{session_id}/selections", response_model=list[ProductOut])
-def list_selections(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(UserSession).filter(UserSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    product_ids = [s.product_id for s in session.selections]
-    if not product_ids:
-        return []
-    products = db.query(Product).filter(Product.id.in_(product_ids)).all()
-    product_map = {p.id: p for p in products}
-    ordered = [product_map[pid] for pid in product_ids if pid in product_map]
-    return [to_product_out(p) for p in ordered]
-
-
-@app.get("/api/debug/pbcf")
-def pbcf_debug(db: Session = Depends(get_db)):
-    stats = recommender.pbcf_stats(db)
-    return stats
-
-
-app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
-
-
-def to_product_out(product: Product) -> ProductOut:
-    return ProductOut(
-        id=product.id,
-        title=product.title,
-        vendor=product.vendor,
-        product_type=product.product_type,
-        price_min=product.price_min,
-        price_max=product.price_max,
-        tags=product.tags(),
-        options=product.options(),
-        description=product.description,
-        url=product.url,
-        images=[ProductImageOut(url=img.url, alt=img.alt, position=img.position) for img in product.images],
-    )
+# Mount frontend (production React build if available).
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend")
+elif FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

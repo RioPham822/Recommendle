@@ -1,14 +1,17 @@
+"""Category profile metadata and feature token/humanization helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-
 
 DEFAULT_CATEGORY = "fountain_pens"
 
 
 @dataclass(frozen=True)
 class CategoryProfile:
+    """Describes per-category labels and model feature fields."""
+
     id: str
     display_name: str
     item_singular: str
@@ -81,10 +84,12 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
 
 
 def supported_categories() -> list[str]:
+    """Return all configured category identifiers."""
     return list(_CATEGORY_PROFILES.keys())
 
 
 def normalize_category(value: str | None) -> str:
+    """Normalize and validate a category input value."""
     if value is None:
         return DEFAULT_CATEGORY
     normalized = value.strip().lower()
@@ -94,10 +99,12 @@ def normalize_category(value: str | None) -> str:
 
 
 def get_category_profile(category: str | None) -> CategoryProfile:
+    """Return profile metadata for a normalized category."""
     return _CATEGORY_PROFILES[normalize_category(category)]
 
 
 def category_copy(category: str | None) -> dict[str, str]:
+    """Return frontend-friendly copy text for a category."""
     profile = get_category_profile(category)
     return {
         "id": profile.id,
@@ -114,12 +121,20 @@ def category_copy(category: str | None) -> dict[str, str]:
 
 
 def _value_for_field(product: Any, field: str) -> Any:
+    """Read a field from dict/object product payloads safely."""
     if isinstance(product, dict):
         return product.get(field)
-    return getattr(product, field, None)
+    direct = getattr(product, field, None)
+    if direct is not None:
+        return direct
+    payload = getattr(product, "data", None)
+    if isinstance(payload, dict):
+        return payload.get(field)
+    return None
 
 
 def _to_slug(value: Any) -> str:
+    """Normalize free text into a stable lowercase token fragment."""
     if value is None:
         return ""
     text = str(value).strip().lower()
@@ -131,6 +146,7 @@ def _to_slug(value: Any) -> str:
 
 
 def extract_feature_tokens(product: Any, category: str | None) -> tuple[list[str], dict[str, float]]:
+    """Extract categorical tokens and numeric feature values for a product."""
     profile = get_category_profile(category)
     tokens: list[str] = []
     numeric_values: dict[str, float] = {}
@@ -153,9 +169,7 @@ def extract_feature_tokens(product: Any, category: str | None) -> tuple[list[str
                 for opt_value in opt_values:
                     value_slug = _to_slug(opt_value)
                     if value_slug:
-                        tokens.append(
-                            f"cat::{profile.id}::multi::option::{opt_slug}|{value_slug}"
-                        )
+                        tokens.append(f"cat::{profile.id}::multi::option::{opt_slug}|{value_slug}")
             continue
 
         if isinstance(value, list):
@@ -177,10 +191,12 @@ def extract_feature_tokens(product: Any, category: str | None) -> tuple[list[str
 
 
 def is_numeric_feature_key(raw: str) -> bool:
+    """Return True when a token encodes numeric feature dimension."""
     return "::num::" in raw
 
 
 def _field_label(field: str) -> str:
+    """Map raw field names to short display labels."""
     mapping = {
         "product_type": "Type",
         "primary_country": "Country",
@@ -197,6 +213,7 @@ def _field_label(field: str) -> str:
 
 
 def humanize_feature(raw: str) -> str | None:
+    """Convert raw feature token into user-facing text, skipping noisy labels."""
     parts = raw.split("::")
     if len(parts) < 5 or parts[0] != "cat":
         return raw.title()
@@ -234,6 +251,7 @@ def humanize_feature(raw: str) -> str | None:
 
 
 def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Humanize and deduplicate feature labels while preserving order."""
     seen: set[str] = set()
     results: list[tuple[str, float]] = []
     for raw, weight in raw_list:
@@ -249,6 +267,7 @@ def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, 
 
 
 def numeric_preference_label(raw: str, weight: float) -> str:
+    """Return semantic label for numeric-feature preference direction."""
     parts = raw.split("::")
     if len(parts) < 4:
         return "Numeric Preference"
