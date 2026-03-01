@@ -9,3 +9,4 @@ sqlalchemy
 asyncpg
 tqdm
 matplotlib
+coverage

@@ -70,3 +70,4 @@ backend/backups/
 backend/data/tmdb_ingest_checkpoint.json
 
 *.conf
+.coverage
