@@ -477,9 +477,12 @@ def _build_candidate_lanes(
     end_epoch = int(datetime(end_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp())
     allowed_game_types = "(0,4,8,9,10,11)"
     lane_cap = max(1, max_candidates // 3)
-    primary_pages = max(1, int(max_pages_per_lane))
-    secondary_pages = max(1, primary_pages // 2)
-    decade_pages = max(1, primary_pages // 6)
+    # Scale lane depth from the historical baseline (primary=6, secondary=4, decade=1)
+    # so default behavior stays unchanged while larger values broaden coverage.
+    scale = max(1.0 / 6.0, float(max_pages_per_lane) / 6.0)
+    primary_pages = max(1, int(math.ceil(6 * scale)))
+    secondary_pages = max(1, int(math.ceil(4 * scale)))
+    decade_pages = max(1, int(math.ceil(1 * scale)))
     decade_start = (start_year // 10) * 10
     decade_lane_count = 0
     while decade_start <= end_year:
@@ -912,7 +915,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-pages-per-lane",
         type=int,
-        default=6,
+        default=20,
         help="Maximum pages to fetch per lane query while building candidates",
     )
     parser.add_argument(
