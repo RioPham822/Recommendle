@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+from datetime import datetime
+from pathlib import Path
 
 from app.db import (
     GameRecord,
@@ -18,6 +21,7 @@ from app.db import (
     PrefixRatingRecord,
     ProductRecord,
     UserRecord,
+    record_to_dict,
     get_db,
     init_db,
 )
@@ -78,12 +82,63 @@ async def clear_games() -> None:
     await db_gen.aclose()
 
 
+async def clear_products(category: str | None = None) -> None:
+    """Delete product rows, optionally scoped to a single category."""
+    await init_db()
+    db_gen = get_db()
+    db = await anext(db_gen)
+    stmt = delete(ProductRecord)
+    if category:
+        stmt = stmt.where(ProductRecord.category == category)
+    deleted_products = await db.execute(stmt)
+    await db.commit()
+    if category:
+        print(f"deleted products ({category}): {int(deleted_products.rowcount or 0)}")
+    else:
+        print(f"deleted products (all categories): {int(deleted_products.rowcount or 0)}")
+    await db_gen.aclose()
+
+
+def _json_default(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+async def export_movies_json(output: str) -> None:
+    """Export all movie product records to a JSON file."""
+    await init_db()
+    db_gen = get_db()
+    db = await anext(db_gen)
+    rows = await db.execute(select(ProductRecord).where(ProductRecord.category == "movies"))
+    movies = [record_to_dict(row) for row in rows.scalars().all()][:10]
+    await db_gen.aclose()
+
+    output_path = Path(output)
+    if not output_path.is_absolute():
+        output_path = Path(__file__).resolve().parent / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(movies, indent=2, ensure_ascii=False, default=_json_default), encoding="utf-8")
+    print(f"exported_movies: {len(movies)}")
+    print(f"output: {output_path}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Postgres local DB utility")
     parser.add_argument(
         "command",
-        choices=["summary", "list-collections", "clear-games"],
+        choices=["summary", "list-collections", "clear-games", "clear-products", "export-movies-json"],
         help="Operation to run",
+    )
+    parser.add_argument(
+        "--output",
+        default="data/movies_export.json",
+        help="Output file path for export-movies-json (default: backend/data/movies_export.json)",
+    )
+    parser.add_argument(
+        "--category",
+        default=None,
+        help="Optional category filter for clear-products (example: movies)",
     )
     return parser.parse_args()
 
@@ -94,6 +149,10 @@ def main() -> None:
         asyncio.run(summary())
     elif args.command == "clear-games":
         asyncio.run(clear_games())
+    elif args.command == "clear-products":
+        asyncio.run(clear_products(category=args.category))
+    elif args.command == "export-movies-json":
+        asyncio.run(export_movies_json(args.output))
     else:
         asyncio.run(list_collections())
 

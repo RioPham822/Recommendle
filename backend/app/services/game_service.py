@@ -44,8 +44,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
 
     async def _ensure_model(self, db: AsyncSession) -> PrefixCFModel:
         """Ensure feature space/model are loaded before scoring operations."""
-        if self.recommender.feature_space is None or self.recommender.model is None:
-            await self.recommender.refresh(db)
+        await self.recommender.ensure_fresh(db)
         if self.recommender.feature_space is None or self.recommender.model is None:
             raise ValueError("Recommendation model is not initialized")
         return PrefixCFModel(self.recommender.feature_space)
@@ -97,7 +96,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
     def _card_projection(self, category: str) -> dict[str, int]:
         """Build projection for card rendering (features + title/image)."""
         projection = self._feature_projection(category)
-        for field in ("title", "images"):
+        for field in ("title", "images", "vendor", "tags"):
             projection[field] = 1
         return projection
 
@@ -105,6 +104,16 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         """Normalize a product into a category-aware UI card payload."""
         resolved_category = normalize_category(category or product.get("category") or "fountain_pens")
         profile = get_category_profile(resolved_category)
+
+        def has_display_value(value: Any) -> bool:
+            if value is None:
+                return False
+            if isinstance(value, str):
+                return bool(value.strip())
+            if isinstance(value, (list, tuple, set, dict)):
+                return len(value) > 0
+            return True
+
         image_url = None
         images = product.get("images") or []
         if images:
@@ -117,7 +126,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             if field in {"tags", "vendor"}:
                 continue
             value = product.get(field)
-            if value is not None:
+            if has_display_value(value):
                 attributes[field] = value
         if resolved_category == "movies":
             release_year = product.get("release_year")

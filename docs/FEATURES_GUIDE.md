@@ -50,8 +50,11 @@ docker compose exec backend python -m scripts.load_db
 Optional movie ingestion:
 
 ```bash
-docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 1000
+docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates 3000 --max-rps 8
 ```
+
+`--max-movies` is optional if you want to cap final upserts.
+For a fresh ingest strategy/target, add `--no-resume`.
 
 ### Local DB utility
 From `backend/`:
@@ -60,6 +63,7 @@ From `backend/`:
 python test.py summary
 python test.py list-collections
 python test.py clear-games
+python test.py clear-products --category movies
 ```
 
 ## 4. Backup/Restore
