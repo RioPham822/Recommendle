@@ -68,6 +68,8 @@ nul
 
 backend/backups/
 backend/data/tmdb_ingest_checkpoint.json
+backend/data/movies_export.json
 
 *.conf
 .coverage
+docs/Dataset docs
