@@ -60,6 +60,45 @@ function recMeta(rec) {
   return `${rec.vendor || 'Unknown'} · ${formatPrice(rec.price_min, rec.price_max)}`;
 }
 
+function RecommendationListItem({ rec, rank, extraClassName = '', rankClassName = '' }) {
+  const className = ['rec-item', 'rec-item-previewable', extraClassName].filter(Boolean).join(' ');
+  const rankClasses = ['rec-rank', rankClassName].filter(Boolean).join(' ');
+
+  return (
+    <li className={className}>
+      <span className={rankClasses}>#{rank}</span>
+      <div className="rec-info">
+        <strong>{rec.title}</strong>
+        <span className="muted">{recMeta(rec)}</span>
+      </div>
+      <span className="rec-score">{rec.score.toFixed(2)}</span>
+      <div className="rec-hover-preview">
+        <div className="candidate-preview-media">
+          {rec.image_url ? (
+            <img src={rec.image_url} alt={rec.title} loading="lazy" />
+          ) : (
+            <div className="candidate-preview-noimg">No image</div>
+          )}
+        </div>
+        <div className="candidate-preview-body">
+          <p className="candidate-preview-title">{rec.title}</p>
+          <p className="candidate-preview-subtitle">{rec.subtitle || rec.vendor || 'Unknown'}</p>
+          {Object.entries(rec.attributes || {}).slice(0, 4).map(([key, value]) => (
+            <p key={key} className="candidate-preview-attr">
+              <strong>{key.replace(/_/g, ' ')}</strong>: {Array.isArray(value) ? value.slice(0, 2).join(', ') : String(value)}
+            </p>
+          ))}
+          <div className="tag-list">
+            {[...(rec.meta_badges || []), ...((rec.tags || []).slice(0, 3))].map((token) => (
+              <span key={token}>{token}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export default function FinalSummary({
   playerName,
   humanScore,
@@ -175,37 +214,7 @@ export default function FinalSummary({
           </p>
           <ul className="rec-list">
             {summary.top5_recommendations.map((rec, i) => (
-              <li key={rec.id} className="rec-item rec-item-previewable">
-                <span className="rec-rank">#{i + 1}</span>
-                <div className="rec-info">
-                  <strong>{rec.title}</strong>
-                  <span className="muted">{recMeta(rec)}</span>
-                </div>
-                <span className="rec-score">{rec.score.toFixed(2)}</span>
-                <div className="rec-hover-preview">
-                  <div className="candidate-preview-media">
-                    {rec.image_url ? (
-                      <img src={rec.image_url} alt={rec.title} loading="lazy" />
-                    ) : (
-                      <div className="candidate-preview-noimg">No image</div>
-                    )}
-                  </div>
-                  <div className="candidate-preview-body">
-                    <p className="candidate-preview-title">{rec.title}</p>
-                    <p className="candidate-preview-subtitle">{rec.subtitle || rec.vendor || 'Unknown'}</p>
-                    {Object.entries(rec.attributes || {}).slice(0, 4).map(([key, value]) => (
-                      <p key={key} className="candidate-preview-attr">
-                        <strong>{key.replace(/_/g, ' ')}</strong>: {Array.isArray(value) ? value.slice(0, 2).join(', ') : String(value)}
-                      </p>
-                    ))}
-                    <div className="tag-list">
-                      {[...(rec.meta_badges || []), ...((rec.tags || []).slice(0, 3))].map((token) => (
-                        <span key={token}>{token}</span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </li>
+              <RecommendationListItem key={rec.id} rec={rec} rank={i + 1} />
             ))}
           </ul>
         </div>
@@ -232,14 +241,13 @@ export default function FinalSummary({
               </h4>
               <ul className="rec-list">
                 {summary.hidden_gems_products.map((gem, i) => (
-                  <li key={gem.id} className="rec-item hidden-gem-item">
-                    <span className="rec-rank gem-rank">#{i + 1}</span>
-                    <div className="rec-info">
-                      <strong>{gem.title}</strong>
-                      <span className="muted">{recMeta(gem)}</span>
-                    </div>
-                    <span className="rec-score">{gem.score.toFixed(2)}</span>
-                  </li>
+                  <RecommendationListItem
+                    key={gem.id}
+                    rec={gem}
+                    rank={i + 1}
+                    extraClassName="hidden-gem-item"
+                    rankClassName="gem-rank"
+                  />
                 ))}
               </ul>
             </div>
