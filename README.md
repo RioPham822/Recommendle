@@ -21,17 +21,13 @@ Live website: https://recommendle-frontend.onrender.com
   - feature mode
 - Tracks leaderboard and player history by category.
 - Detects hidden/latent preference patterns and surfaces "hidden gems."
-
-## New Features (Feb 2026)
-- **Excel/CSV Export**: Export database collections to Excel-compatible CSV format
-  - Interactive menu for easy selection
-  - Command-line support for scripting
-  - All data in `./data/exports/`
-- **User Authentication**: Username/password login system for multiple independent players
-  - Secure registration & login endpoints
-  - Session token management (7-day expiry)
-  - User accounts with game history tracking
-  - Password hashing with PBKDF2 (100,000 iterations)
+- Supports account-based play with username/password authentication:
+  - registration and login endpoints
+  - session tokens with expiry tracking
+  - user accounts with independent play history
+- Includes local maintenance utilities in `backend/test.py`:
+  - database summaries and cleanup commands
+  - movie export to JSON via `export-movies-json`
 
 See [FEATURES_GUIDE.md](docs/FEATURES_GUIDE.md) for detailed usage.
 Dataset extension guide: [ADDING_DATASETS.md](docs/ADDING_DATASETS.md)
@@ -48,7 +44,9 @@ backend/
   app/
     main.py              # Active FastAPI app (Postgres)
     routes/game.py             # Game API endpoints
+    routes/auth.py             # Auth API endpoints
     services/game_service.py   # Core game logic
+    services/auth.py           # User/session auth logic
     ml/prefix_cf.py            # Preference model + hidden preference logic
   data/
     products.json              # Fountain pen catalog in repo
@@ -61,6 +59,8 @@ frontend/
   src/
 start.bat                      # Convenience launcher (Windows)
 ```
+
+`start.bat` starts `postgres`, `backend`, seeds the fountain pen dataset, and then starts the optional local frontend container.
 
 ## Prerequisites
 - Docker Desktop (Windows/macOS) or Docker Engine + Docker Compose plugin (Linux)
@@ -196,6 +196,16 @@ Expected:
 | GET | `/api/game/{game_id}/summary` | Get final game insights |
 | GET | `/api/game/leaderboard` | Get leaderboard |
 | GET | `/api/game/player/{player_name}/history` | Get player game history |
+| GET | `/api/game/resume-state` | Check whether a player has an in-progress game |
+
+## Auth API Endpoints
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/auth/register` | Register a user and return a session token |
+| POST | `/api/auth/login` | Login and return a session token |
+| GET | `/api/auth/user/{user_id}` | Get account profile details |
+| POST | `/api/auth/change-password` | Change password for a user |
+| POST | `/api/auth/logout` | Invalidate a session token |
 
 ---
 
@@ -208,6 +218,7 @@ Run these from repo root:
 | Ingest movies from TMDB | `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates 3000 --max-rps 8` | Optional movie category ingest |
 | Ingest games from IGDB | `docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates 5000` | Optional games category ingest |
 | Backend DB utility (`backend/test.py`) | `docker compose exec backend python test.py summary` | Quick DB summary and maintenance commands |
+| Export movies to JSON | `docker compose exec backend python test.py export-movies-json --output data/movies_export.json` | Writes a JSON export of movie records |
 | Category migration | `docker compose exec backend python -m scripts.migrate_multicategory_schema` | No-op placeholder in Postgres mode |
 | Evaluate AI on completed games | `docker compose exec backend python -m scripts.evaluate_pbcf` | Prints accuracy/score metrics from completed games |
 
@@ -219,6 +230,7 @@ Warning:
 - `docker compose exec backend python test.py list-collections`
 - `docker compose exec backend python test.py clear-games`
 - `docker compose exec backend python test.py clear-products --category movies`
+- `docker compose exec backend python test.py export-movies-json --output data/movies_export.json`
 
 ## Ingestion Strategy (TMDB + IGDB)
 This section explains how candidate items are fetched before upsert.
