@@ -126,6 +126,11 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             if field in {"tags", "vendor"}:
                 continue
             value = product.get(field)
+            if field == "options" and isinstance(value, dict):
+                for option_name, option_values in value.items():
+                    if has_display_value(option_values):
+                        attributes[str(option_name)] = option_values
+                continue
             if has_display_value(value):
                 attributes[field] = value
         if resolved_category == "movies":
