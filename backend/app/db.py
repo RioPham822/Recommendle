@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     tmdb_api_key: str = ""
+    igdb_client_id: str = ""
+    igdb_client_secret: str = ""
 
 
 settings = Settings()

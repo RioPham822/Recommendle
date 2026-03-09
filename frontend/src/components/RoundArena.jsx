@@ -11,6 +11,7 @@ export default function RoundArena({
   selectedPick,
   onSelectPick,
   onSubmitPick,
+  onHome,
   submitting,
 }) {
   if (!round) {
@@ -51,6 +52,13 @@ export default function RoundArena({
       </div>
 
       <div className="round-actions">
+        <button
+          type="button"
+          className="ghost"
+          onClick={onHome}
+        >
+          Home
+        </button>
         <button
           type="button"
           onClick={onSubmitPick}

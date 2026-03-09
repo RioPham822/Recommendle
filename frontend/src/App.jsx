@@ -483,6 +483,7 @@ export default function App() {
                 selectedIds={selectedIds}
                 onToggle={handleToggleOnboarding}
                 onOpenRating={() => setRatingModalOpen(true)}
+                onHome={resetAll}
                 mode={mode}
                 categoryCopy={onboarding?.category_copy || {}}
               />
@@ -509,6 +510,7 @@ export default function App() {
               selectedPick={selectedRoundPick}
               onSelectPick={setSelectedRoundPick}
               onSubmitPick={handleSubmitRoundPick}
+              onHome={resetAll}
               submitting={busy.pick}
             />
           )}
@@ -518,6 +520,7 @@ export default function App() {
               result={roundResult}
               categoryCopy={roundResult?.category_copy || {}}
               onNext={handleResultNext}
+              onHome={resetAll}
               loadingNext={busy.next}
             />
           )}
@@ -540,4 +543,3 @@ export default function App() {
     </main>
   );
 }
-

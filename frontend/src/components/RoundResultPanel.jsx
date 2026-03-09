@@ -24,7 +24,7 @@ function FeatureTag({ name }) {
   return <span className="feature-tag">{name}</span>;
 }
 
-export default function RoundResultPanel({ result, categoryCopy = {}, onNext, loadingNext }) {
+export default function RoundResultPanel({ result, categoryCopy = {}, onNext, onHome, loadingNext }) {
   if (!result) return null;
 
   const { ai_correct, ai_exact, ai_rank_of_pick, ai_explanation, post_round_metrics } = result;
@@ -159,6 +159,9 @@ export default function RoundResultPanel({ result, categoryCopy = {}, onNext, lo
       </div>
 
       <div className="round-actions">
+        <button type="button" className="ghost" onClick={onHome}>
+          Home
+        </button>
         <button type="button" onClick={onNext} disabled={loadingNext}>
           {loadingNext ? 'Loading...' : result.game_complete ? 'View Final Summary' : 'Next Round ->'}
         </button>

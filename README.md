@@ -14,6 +14,7 @@ Live website: https://recommendle-frontend.onrender.com
 - Supports category-aware gameplay:
   - `fountain_pens` (included in repo and loadable immediately)
   - `movies` (loadable via TMDB ingestion script)
+  - `games` (loadable via IGDB ingestion script)
 - Uses **Postgres** as the active backend for the app (`app.main`).
 - Provides two exploration modes in UI:
   - visual mode
@@ -54,6 +55,7 @@ backend/
   scripts/
     load_db.py                 # Loads fountain pens into Postgres-backed store
     ingest_movies_tmdb.py      # Ingests movies from TMDB into Postgres
+    ingest_games_igdb.py       # Ingests games from IGDB into Postgres
     migrate_multicategory_schema.py
 frontend/
   src/
@@ -83,7 +85,7 @@ docker compose up --build -d postgres backend
 ### 2b. (Optional) Start local frontend container
 If you want the frontend in Docker for local testing:
 ```bash
-docker compose --profile local-frontend up -d frontend
+docker compose --profile local-frontend up -d --build frontend
 ```
 
 ### 3. Load the fountain pen dataset (required once per new database)
@@ -105,12 +107,37 @@ docker compose up -d --build backend
 ```
 3. Run ingestion:
 ```bash
-docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 1000
+docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates 3000 --max-rps 8
 ```
 
 Notes:
-- Large ingests can take hours (for example, `--max-movies 50000`).
+- `--max-movies` is optional. If omitted, all quality-passing candidates are upserted.
+- If provided, `--max-movies` is the final cap after filtering/diversity balancing.
+- Candidate fetch volume is controlled by `--max-candidates` (higher = broader but slower).
+- `--max-pages-per-lane` controls pagination depth per lane query during candidate discovery.
+- Request pacing is controlled by `--max-rps` and includes 429/network backoff handling.
+- For a new target/strategy, use `--no-resume` (otherwise checkpoint data is reused).
 - Progress is checkpointed at `backend/data/tmdb_ingest_checkpoint.json`.
+- If interrupted, rerun the same command to resume.
+
+### 4b. (Optional) Load games from IGDB
+If you want the `games` category:
+1. Set `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` in `backend/.env`
+2. Recreate backend with the updated env:
+```bash
+docker compose up -d --build backend
+```
+3. Run ingestion:
+```bash
+docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates 5000
+```
+
+Notes:
+- `--max-games` is optional. If omitted, all quality-passing candidates are upserted.
+- If provided, `--max-games` is the final cap after filtering/diversity balancing.
+- Candidate fetch volume is controlled by `--max-candidates` (higher = broader but slower).
+- `--max-pages-per-lane` controls pagination depth per IGDB lane query (higher can increase total unique candidates).
+- Progress is checkpointed at `backend/data/igdb_ingest_checkpoint.json`.
 - If interrupted, rerun the same command to resume.
 
 ### 5. Open app
@@ -140,7 +167,7 @@ docker compose exec backend python -m scripts.load_db
 
 Local frontend (optional):
 ```bash
-docker compose --profile local-frontend up -d frontend
+docker compose --profile local-frontend up -d --build frontend
 ```
 
 ---
@@ -152,6 +179,7 @@ Check categories endpoint in browser:
 Expected:
 - `fountain_pens` should show a nonzero count (>= 50 needed to play).
 - `movies` may be 0 unless TMDB ingestion was run.
+- `games` may be 0 unless IGDB ingestion was run.
 
 ---
 
@@ -177,21 +205,112 @@ Run these from repo root:
 | Script | Command | Purpose |
 |---|---|---|
 | Load pen dataset into Postgres-backed store | `docker compose exec backend python -m scripts.load_db` | Required for clone users to play |
-| Ingest movies from TMDB | `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 1000` | Optional movie category ingest |
+| Ingest movies from TMDB | `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates 3000 --max-rps 8` | Optional movie category ingest |
+| Ingest games from IGDB | `docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates 5000` | Optional games category ingest |
+| Backend DB utility (`backend/test.py`) | `docker compose exec backend python test.py summary` | Quick DB summary and maintenance commands |
 | Category migration | `docker compose exec backend python -m scripts.migrate_multicategory_schema` | No-op placeholder in Postgres mode |
 | Evaluate AI on completed games | `docker compose exec backend python -m scripts.evaluate_pbcf` | Prints accuracy/score metrics from completed games |
 
 Warning:
 - Some legacy migration scripts were previously included but are deprecated or removed. Do not run unknown migration scripts against production data.
 
+`backend/test.py` examples (from repo root):
+- `docker compose exec backend python test.py summary`
+- `docker compose exec backend python test.py list-collections`
+- `docker compose exec backend python test.py clear-games`
+- `docker compose exec backend python test.py clear-products --category movies`
+
+## Ingestion Strategy (TMDB + IGDB)
+This section explains how candidate items are fetched before upsert.
+
+### TMDB movie ingest (`scripts.ingest_movies_tmdb`)
+- Candidate discovery uses round-robin pagination across multiple lanes until `--max-candidates` is reached (or lanes are exhausted):
+  - `trending_day`, `trending_week`
+  - `discover_popularity` (per-year, `sort_by=popularity.desc`)
+  - `discover_vote_count` (per-year, `sort_by=vote_count.desc`, `vote_count.gte=50`)
+  - `discover_long_tail` (per-year, `vote_count` between 20 and 400, `vote_average.gte=5.5`)
+  - `discover_diversity` (language+decade lanes and genre lanes, generally `vote_count.gte=20`)
+  - `discover_classics` (`release_date <= 2000-12-31`, `vote_average.gte=7.5`, `vote_count.gte=5000`)
+- Hard quality filters (applied after details fetch):
+  - released (not future date)
+  - runtime >= 60 minutes
+  - has poster
+  - at least one genre
+  - `vote_count >= --min-vote-count` (default 20)
+- Soft ranking + diversity:
+  - quality score combines vote count, vote average, popularity, recency
+  - if `--max-movies` is set, final selection uses diversity balancing across decade/genre/language
+  - includes a classic-movie quota when diversity selection is applied
+- Progress and resume:
+  - checkpoint: `backend/data/tmdb_ingest_checkpoint.json`
+  - interactive multi-bars available with `--lane-bars`
+  - `--no-resume` forces fresh candidate discovery
+
+### IGDB game ingest (`scripts.ingest_games_igdb`)
+- Candidate discovery builds a deduplicated pool from lane queries (IGDB APICalypse), including:
+  - `popular_hype`
+  - `popular_rating_count`
+  - `high_rated`
+  - `recent_hype`
+  - `long_tail_quality`
+  - `decade_balance` (per-decade lane)
+  - `classics` (released on/before 2005-12-31, strong rating thresholds)
+- Base constraints for most lanes:
+  - `version_parent = null`
+  - non-null release date within `[--start-year, --end-year]` and not future-dated
+  - category in `(0,4,8,9,10,11)` (main game-like categories)
+- Hard quality filters (after details fetch):
+  - released (not future date)
+  - has cover
+  - at least one genre and one platform
+  - `total_rating_count >= --min-rating-count` (default 20)
+  - `total_rating >= --min-total-rating` (default 60.0)
+- Soft ranking + diversity:
+  - quality score combines total rating, rating count, hypes, recency
+  - if `--max-games` is set, final selection uses diversity balancing across decade/genre/platform and a classics quota
+- Progress and resume:
+  - checkpoint: `backend/data/igdb_ingest_checkpoint.json`
+  - `--no-resume` forces fresh candidate discovery
+
+### Run long jobs in background (Ubuntu VM)
+If an ingest command may run for hours, run it with `nohup` and disable TTY allocation:
+
+```bash
+nohup docker compose exec -T backend python -m scripts.ingest_movies_tmdb --max-candidates 30000 --max-rps 8 > backend/data/ingest_movies.log 2>&1 &
+echo $! > backend/data/ingest_movies.pid
+```
+
+View logs while detached:
+```bash
+tail -f backend/data/ingest_movies.log
+```
+
+Check process:
+```bash
+ps -fp "$(cat backend/data/ingest_movies.pid)"
+```
+
+Stop process:
+```bash
+kill "$(cat backend/data/ingest_movies.pid)"
+```
+
+Notes:
+- `2>&1` captures both normal output and errors in the same log file.
+- `tqdm` output is still logged, but in non-interactive mode it may appear as periodic text updates instead of a single animated line.
+
 ## When To Run Data Scripts
 - Run `docker compose exec backend python -m scripts.load_db`:
   - right after first `docker compose up --build -d postgres backend` on a new machine
   - any time you reset volumes with `docker compose down -v`
   - any time `fountain_pens` count drops below 50
-- Run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies ...`:
+- Run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates ...`:
   - only if you want the `movies` category enabled
   - again later if you want to ingest more movies
+  - use `--no-resume` when changing target size or ingest strategy
+- Run `docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates ...`:
+  - only if you want the `games` category enabled
+  - again later if you want to ingest more games
 - Run `docker compose exec backend python -m scripts.migrate_multicategory_schema`:
   - only when importing old data that may miss the `category` field
   - usually not needed for fresh Docker-first setups
@@ -215,7 +334,8 @@ Cause:
 
 Fix:
 - For pens: run `docker compose exec backend python -m scripts.load_db`
-- For movies: run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-movies 50000`
+- For movies: run `docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates 30000 --max-rps 8 --no-resume`
+- For games: run `docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates 50000`
 
 ### "Detected products without `category` field"
 Fix:
@@ -233,4 +353,3 @@ docker compose up -d --build
 
 ## License
 Developed as part of CSC 492 (Senior Design coursework).
-

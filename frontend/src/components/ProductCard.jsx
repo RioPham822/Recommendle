@@ -4,8 +4,15 @@ import { formatPrice } from '../lib/api';
 export default function ProductCard({ product, mode, selected, onClick, compact = false }) {
   const isMovie = product.category === 'movies';
   const hasPrice = typeof product.price_min === 'number' || typeof product.price_max === 'number';
+  const hasValue = (value) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim() !== '';
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  };
   const attributes = Object.entries(product.attributes || {})
-    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .filter(([, value]) => hasValue(value))
     .slice(0, 5);
   const featureTokens = [...(product.meta_badges || []), ...(product.tags || []).slice(0, 4)].slice(0, 6);
 
