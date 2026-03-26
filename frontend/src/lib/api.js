@@ -75,10 +75,10 @@ export async function logoutUser(userId, sessionToken) {
 
 // ============ GAME ENDPOINTS ============
 
-export async function startGame(playerName, category = 'fountain_pens', freshStart = false) {
+export async function startGame(playerName, category = 'fountain_pens', freshStart = false, mode = 'classic') {
   return request('/api/game/start', {
     method: 'POST',
-    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart }),
+    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart, mode }),
   });
 }
 
@@ -106,16 +106,52 @@ export async function submitOnboarding(gameId, selectedProductIds, rating) {
   });
 }
 
+export async function submitSeedPreferences(gameId, likes = {}, dislikes = {}, likeProductIds = [], dislikeProductIds = []) {
+  return request(`/api/game/${gameId}/seed`, {
+    method: 'POST',
+    body: JSON.stringify({
+      likes,
+      dislikes,
+      like_product_ids: likeProductIds,
+      dislike_product_ids: dislikeProductIds,
+    }),
+  });
+}
+
+export async function searchProducts(query, category = 'movies', limit = 12, fuzzy = true) {
+  const params = new URLSearchParams({
+    q: query,
+    category,
+    limit: String(limit),
+    fuzzy: fuzzy ? 'true' : 'false',
+  });
+  return request(`/api/products/search?${params.toString()}`);
+}
+
 export async function startRound(gameId) {
   return request(`/api/game/${gameId}/round/start`, {
     method: 'POST',
   });
 }
 
-export async function submitRoundPick(gameId, roundNumber, productId) {
+export async function refreshRound(gameId, lessLikeIds = []) {
+  return request(`/api/game/${gameId}/round/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({ less_like_ids: lessLikeIds }),
+  });
+}
+
+export async function submitRoundPick(gameId, roundNumber, productId, lessLikeIds = []) {
   return request(`/api/game/${gameId}/round/${roundNumber}/pick`, {
     method: 'POST',
-    body: JSON.stringify({ product_id: productId }),
+    body: JSON.stringify({ product_id: productId, less_like_ids: lessLikeIds }),
+  });
+}
+
+export async function submitGameFeedback(gameId, productId, action = 'less_like_this') {
+  return request(`/api/game/${gameId}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ product_id: productId, action }),
   });
 }
 

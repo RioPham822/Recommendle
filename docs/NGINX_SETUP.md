@@ -38,7 +38,7 @@ docker compose up -d postgres backend
 ### Local frontend + backend (for testing on VM)
 
 ```bash
-docker compose --profile local-frontend up -d
+docker compose --profile local-frontend up -d --build
 ```
 
 ## 2. Verify Backend Is Reachable Locally
@@ -118,7 +118,7 @@ Examples:
 
 ```bash
 # Uses fallback http://localhost:8015
-docker compose --profile local-frontend up -d frontend
+docker compose --profile local-frontend up -d --build frontend
 
 # Overrides fallback and uses public backend URL
 VITE_API_BASE_URL=https://sd-vm23.csc.ncsu.edu docker compose --profile local-frontend up -d --build frontend

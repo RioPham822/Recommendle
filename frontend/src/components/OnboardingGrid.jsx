@@ -6,6 +6,7 @@ export default function OnboardingGrid({
   selectedIds,
   onToggle,
   onOpenRating,
+  onHome,
   mode,
   displaySchema = {},
   categoryCopy = {},
@@ -21,6 +22,13 @@ export default function OnboardingGrid({
         </div>
         <div className="counter-block">
           <span>{selectedIds.length}/10 selected</span>
+          <button
+            type="button"
+            className="ghost"
+            onClick={onHome}
+          >
+            Home
+          </button>
           <button
             type="button"
             onClick={onOpenRating}

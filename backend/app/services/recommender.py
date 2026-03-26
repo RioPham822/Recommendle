@@ -32,16 +32,24 @@ class Recommender:
         self.item_norms: dict[str, float] = {}
         self.pbcf = PBCFEngine(k=6, iters=40)
         self._rating_count = 0
+        self._product_count = 0
 
     async def refresh(self, db: AsyncSession) -> None:
         """Rebuild feature space/model and cached item vectors from current products."""
         rows = (await db.execute(select(ProductRecord))).scalars().all()
         products = [Product(**record_to_dict(row)) for row in rows]
+        self._product_count = len(products)
         self.feature_space = FeatureSpace.build(products)
         self.model = PrefixCFModel(self.feature_space)
         self.item_vectors = {str(p.id): self.feature_space.vectorize(p) for p in products}
         self.item_norms = {pid: float(np.linalg.norm(vec)) for pid, vec in self.item_vectors.items()}
         await self._refresh_pbcf(db)
+
+    async def ensure_fresh(self, db: AsyncSession) -> None:
+        """Refresh model caches when product catalog shape changes."""
+        current_count = int((await db.scalar(select(func.count()).select_from(ProductRecord))) or 0)
+        if self.feature_space is None or self.model is None or current_count != self._product_count:
+            await self.refresh(db)
 
     async def _refresh_pbcf(self, db: AsyncSession) -> None:
         """Retrain PBCF only when rating count has changed."""

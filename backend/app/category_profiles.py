@@ -109,6 +109,25 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         ),
         hidden_tag_tokens=("movie", "movies", "film", "films"),
     ),
+    "games": CategoryProfile(
+        id="games",
+        display_name="Video Games",
+        item_singular="game",
+        item_plural="games",
+        vendor_label="Studio",
+        mode_caption=(
+            "Visual mode prioritizes cover art. Feature mode emphasizes genre, platform, studio, release year, "
+            "and rating signals."
+        ),
+        onboarding_action="Choose 10 games from a pool of 50 to build your taste profile.",
+        top_recommendations_label="AI's Top 5 Games for You",
+        hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
+        hidden_gems_subtitle="Games You Didn't Know You'd Love",
+        redundant_tokens=("game", "games", "video game", "video games"),
+        categorical_fields=("vendor", "decade_bucket", "game_status"),
+        multi_fields=("genres", "themes", "game_modes", "player_perspectives", "platforms", "keywords"),
+        numeric_fields=("release_year", "total_rating", "hypes"),
+    ),
 }
 
 
@@ -259,10 +278,15 @@ def _field_label(field: str) -> str:
         "certification": "Rating",
         "decade_bucket": "Decade",
         "runtime_bucket": "Runtime",
+        "game_status": "Status",
         "genres": "Genre",
         "keywords": "Keyword",
         "production_companies": "Studio",
         "directors": "Director",
+        "themes": "Theme",
+        "game_modes": "Mode",
+        "player_perspectives": "Perspective",
+        "platforms": "Platform",
     }
     return mapping.get(field, field.replace("_", " ").title())
 
@@ -394,4 +418,8 @@ def numeric_preference_label(raw: str, weight: float) -> str:
         return "Higher Rated Titles" if positive else "Lower Rated Titles"
     if field == "popularity":
         return "Popular Titles" if positive else "Niche Titles"
+    if field == "total_rating":
+        return "Higher Rated Titles" if positive else "Lower Rated Titles"
+    if field == "hypes":
+        return "Trending Titles" if positive else "Less Trending Titles"
     return f"{field.replace('_', ' ').title()} Preference"

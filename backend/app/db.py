@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     tmdb_api_key: str = ""
+    igdb_client_id: str = ""
+    igdb_client_secret: str = ""
 
 
 settings = Settings()
@@ -95,6 +97,7 @@ class GameRecord(Base):
     schema_version: Mapped[int] = mapped_column(Integer, default=2)
     player_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), default="fountain_pens", index=True)
+    mode: Mapped[str] = mapped_column(String(20), default="classic", index=True)
     status: Mapped[str] = mapped_column(String(40), default="onboarding", index=True)
     current_round: Mapped[int] = mapped_column(Integer, default=0)
     total_rounds: Mapped[int] = mapped_column(Integer, default=5)
@@ -199,6 +202,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS mode VARCHAR(20) DEFAULT 'classic'"))
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_games_category_status_created ON games(category, status, created_at DESC)")
         )

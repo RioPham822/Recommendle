@@ -6,6 +6,8 @@ export default function WelcomeScreen({
   categories = [],
   selectedCategory,
   setSelectedCategory,
+  gameMode = 'classic',
+  setGameMode,
   onStart,
   onStartFresh,
   loading,
@@ -75,6 +77,33 @@ export default function WelcomeScreen({
             </option>
           ))}
         </select>
+
+        <label htmlFor="mode-select">Game mode</label>
+        <div className="mode-toggle" role="radiogroup" aria-label="Game mode">
+          <button
+            type="button"
+            className={`mode-pill ${gameMode === 'classic' ? 'active' : ''}`}
+            onClick={() => setGameMode && setGameMode('classic')}
+            disabled={loading}
+            role="radio"
+            aria-checked={gameMode === 'classic'}
+          >
+            Classic
+          </button>
+          <button
+            type="button"
+            className={`mode-pill ${gameMode === 'beta' ? 'active' : ''}`}
+            onClick={() => setGameMode && setGameMode('beta')}
+            disabled={loading}
+            role="radio"
+            aria-checked={gameMode === 'beta'}
+          >
+            Beta
+          </button>
+        </div>
+        <p className="mode-help">
+          Classic keeps the original rules. Beta adds experimental feedback tools like “Less like this.”
+        </p>
 
         {showDatasetLoading && (
           <div className="dataset-loading" role="status" aria-live="polite">

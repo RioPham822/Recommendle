@@ -12,6 +12,11 @@ export default function RoundArena({
   selectedPick,
   onSelectPick,
   onSubmitPick,
+  lessLikeIds = [],
+  onToggleLessLike,
+  onRefresh,
+  refreshing = false,
+  onHome,
   submitting,
 }) {
   if (!round) {
@@ -50,11 +55,29 @@ export default function RoundArena({
             onClick={() => onSelectPick(product.id)}
             hoverPanelSide={isDuel ? (index % 2 === 0 ? 'left' : 'right') : null}
             compact
+            showDismiss
+            dismissed={lessLikeIds.includes(product.id)}
+            onToggleDismiss={() => onToggleLessLike && onToggleLessLike(product.id)}
           />
         ))}
       </div>
 
       <div className="round-actions">
+        <button
+          type="button"
+          className="ghost"
+          onClick={onHome}
+        >
+          Home
+        </button>
+        <button
+          type="button"
+          className="secondary-btn"
+          onClick={onRefresh}
+          disabled={refreshing || submitting}
+        >
+          {refreshing ? 'Refreshing...' : 'Refresh'}
+        </button>
         <button
           type="button"
           onClick={onSubmitPick}

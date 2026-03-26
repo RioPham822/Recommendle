@@ -114,12 +114,57 @@ Run all commands below from `backend/` unless noted.
 
 ### Optional / advanced
 - Ingest movies from TMDB:
-  - `python -m scripts.ingest_movies_tmdb --max-movies 50000`
+  - `python -m scripts.ingest_movies_tmdb --max-candidates 30000 --max-rps 8 --no-resume`
+  - `--max-movies` is optional; if omitted, all quality-passing candidates are upserted
+  - if set, `--max-movies` becomes a final selected/upserted cap
+  - `--max-candidates` controls candidate pool breadth and runtime
+  - `--max-pages-per-lane` controls pagination depth per lane query
+  - `--max-rps` controls request pacing; retry/backoff is built in for 429/network issues
+  - `--lane-bars` shows grouped live lane progress bars in interactive terminals
   - Uses checkpoint file: `backend/data/tmdb_ingest_checkpoint.json`
+- Ingest games from IGDB:
+  - `python -m scripts.ingest_games_igdb --max-candidates 5000`
+  - `--max-games` is optional; if omitted, all quality-passing candidates are upserted
+  - if set, `--max-games` becomes a final selected/upserted cap
+  - `--max-candidates` controls candidate pool breadth and runtime
+  - `--max-pages-per-lane` controls pagination depth per lane query
+  - `--max-rps` controls request pacing; retry/backoff is built in for 429/network issues
+  - Uses checkpoint file: `backend/data/igdb_ingest_checkpoint.json`
 - Multi-category schema migration:
   - `python -m scripts.migrate_multicategory_schema`
 - Model evaluation reports:
   - `python -m scripts.evaluate_pbcf`
+
+### Ingestion strategy summary
+For the full operational version (including Docker-first commands and VM background-run examples), see `README.md`:
+- `README.md` -> `Ingestion Strategy (TMDB + IGDB)`
+
+- TMDB lane-based candidate pool:
+  - `trending_day`, `trending_week`
+  - per-year `discover_popularity`, `discover_vote_count`, `discover_long_tail`
+  - `discover_diversity` lanes (language+decade and genre variants)
+  - `discover_classics`
+- TMDB hard quality filters:
+  - release date must not be in the future
+  - runtime >= 60 minutes
+  - poster required
+  - at least one genre
+  - `vote_count >= --min-vote-count`
+- TMDB final selection:
+  - quality score ranking on quality-passing docs
+  - optional `--max-movies` cap applies diversity balancing by decade/genre/language (with classics quota)
+- IGDB candidate lanes:
+  - `popular_hype`, `popular_rating_count`, `high_rated`, `recent_hype`
+  - `long_tail_quality`, `decade_balance`, `classics`
+- IGDB hard quality filters:
+  - release date must not be in the future
+  - cover required
+  - at least one genre and one platform
+  - `total_rating_count >= --min-rating-count`
+  - `total_rating >= --min-total-rating`
+- IGDB final selection:
+  - quality score (total rating, rating count, hypes, recency) + diversity balancing by decade/genre/platform
+  - optional `--max-games` cap after filtering
 
 ---
 
@@ -140,8 +185,9 @@ Run all commands below from `backend/` unless noted.
 
 ### Resume paused movie ingest
 - Re-run same command:
-  - `python -m scripts.ingest_movies_tmdb --max-movies 50000`
+  - `python -m scripts.ingest_movies_tmdb --max-candidates 30000 --max-rps 8`
 - Script resumes from checkpoint automatically.
+- If you want a fresh pool (different target/strategy), include `--no-resume`.
 
 ---
 
@@ -212,4 +258,3 @@ Check:
 2. Add one-command bootstrap script for backend + frontend + data load.
 3. Add automated DB health/data availability check in startup diagnostics.
 4. Continue improving movie ingest completeness and operational docs.
-
