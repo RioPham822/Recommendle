@@ -7,7 +7,6 @@ export default function RoundArena({
   humanScore,
   aiScore,
   mode,
-  displaySchema = {},
   categoryCopy = {},
   selectedPick,
   onSelectPick,
@@ -24,13 +23,12 @@ export default function RoundArena({
   }
 
   const singular = categoryCopy.item_singular || 'item';
-  const isDuel = round.round_mode === 'duel';
 
   return (
     <section className="screen shell">
       <header className="section-header">
         <div>
-          <p className="eyebrow">{isDuel ? 'Higher / Lower Duel' : 'Gameplay'}</p>
+          <p className="eyebrow">Gameplay</p>
           <h2>Round {round.round_number} of {totalRounds}</h2>
         </div>
         <div className="scoreline">
@@ -44,16 +42,14 @@ export default function RoundArena({
         <span>Predicted Set Rating {round.pre_round_metrics.predicted_prefix_rating.toFixed(2)}</span>
       </div>
 
-      <div className={`pool-grid candidates ${isDuel ? 'duel-candidates' : ''}`}>
-        {round.candidates.map((product, index) => (
+      <div className="pool-grid candidates">
+        {round.candidates.map((product) => (
           <ProductCard
             key={product.id}
             product={product}
             mode={mode}
-            displaySchema={displaySchema}
             selected={selectedPick === product.id}
             onClick={() => onSelectPick(product.id)}
-            hoverPanelSide={isDuel ? (index % 2 === 0 ? 'left' : 'right') : null}
             compact
             showDismiss
             dismissed={lessLikeIds.includes(product.id)}
@@ -83,7 +79,7 @@ export default function RoundArena({
           onClick={onSubmitPick}
           disabled={submitting || !selectedPick}
         >
-          {submitting ? 'Submitting pick...' : (isDuel ? `Choose ${singular}` : `Lock In ${singular}`)}
+          {submitting ? 'Submitting pick...' : `Lock In ${singular}`}
         </button>
       </div>
     </section>

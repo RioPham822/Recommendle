@@ -194,14 +194,6 @@ class GamePlayMixin:
         disliked_ids = set(state.get("disliked_ids") or [])
         disliked_tokens = set(state.get("disliked_tokens") or [])
         all_products = await self._all_products_for_scoring(db, category)
-<<<<<<< HEAD
-        candidates_source = [p for p in all_products if str(p["_id"]) not in used]
-        if len(candidates_source) < round_target:
-            raise ValueError("Not enough products left to generate a round")
-
-        scored = self._rank_candidates(model, state, candidates_source)
-        candidate_ids = self._build_round_candidates(game_id, round_number, category, scored)
-=======
         candidates_source = [
             p for p in all_products if str(p["_id"]) not in used and str(p["_id"]) not in disliked_ids
         ]
@@ -210,7 +202,6 @@ class GamePlayMixin:
 
         scored = self._rank_candidates(model, state, candidates_source, category, disliked_tokens)
         candidate_ids = self._build_round_candidates(game_id, round_number, scored)
->>>>>>> 1f90faa389badd944d4f8c625ed0a0a736da73ad
         candidate_products = await self._get_products_by_ids(
             db,
             candidate_ids,

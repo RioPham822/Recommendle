@@ -548,7 +548,6 @@ export default function App() {
                 onOpenRating={() => setRatingModalOpen(true)}
                 onHome={resetAll}
                 mode={mode}
-                displaySchema={onboarding?.display_schema || {}}
                 categoryCopy={onboarding?.category_copy || {}}
               />
               <SetRatingModal
@@ -579,7 +578,6 @@ export default function App() {
               humanScore={humanScore}
               aiScore={aiScore}
               mode={mode}
-              displaySchema={roundData?.display_schema || {}}
               categoryCopy={roundData?.category_copy || {}}
               selectedPick={selectedRoundPick}
               onSelectPick={setSelectedRoundPick}

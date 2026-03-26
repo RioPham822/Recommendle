@@ -112,11 +112,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
     def _card_projection(self, category: str) -> dict[str, int]:
         """Build projection for card rendering (features + title/image)."""
         projection = self._feature_projection(category)
-<<<<<<< HEAD
-        for field in ("title", "images", "description", "url"):
-=======
         for field in ("title", "images", "vendor", "tags"):
->>>>>>> 1f90faa389badd944d4f8c625ed0a0a736da73ad
             projection[field] = 1
         return projection
 

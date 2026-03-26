@@ -1,72 +1,36 @@
 import React from 'react';
 import { formatPrice } from '../lib/api';
 
-function getDisplayValue(product, key) {
-  if (key === 'price') {
-    return formatPrice(product.price_min, product.price_max);
-  }
-  if (key === 'nib_size') {
-    const nibs = product.attributes?.options?.['Nib Size'];
-    return Array.isArray(nibs) && nibs.length > 0 ? nibs[0] : null;
-  }
-  if (key === 'nib_sizes') {
-    const nibs = product.attributes?.options?.['Nib Size'];
-    return Array.isArray(nibs) ? nibs : [];
-  }
-  return product[key] ?? product.attributes?.[key] ?? null;
-}
-
-function formatFieldValue(value, type) {
-  if (value === null || value === undefined || value === '') return '';
-  if (type === 'list') {
-    if (!Array.isArray(value)) return String(value);
-    return value.slice(0, 3).join(', ');
-  }
-  if (type === 'number') {
-    if (typeof value !== 'number') return String(value);
-    return Number.isInteger(value) ? String(value) : value.toFixed(1);
-  }
-  if (type === 'long_text') {
-    const text = String(value);
-    return text.length > 220 ? `${text.slice(0, 220)}...` : text;
-  }
-  if (type === 'link') {
-    return String(value);
-  }
-  return String(value);
-}
-
 export default function ProductCard({
   product,
   mode,
-  displaySchema = {},
   selected,
   onClick,
-  hoverPanelSide = null,
   compact = false,
   showDismiss = false,
   dismissed = false,
   onToggleDismiss,
 }) {
-  const cardFields = Array.isArray(displaySchema.card_fields) ? displaySchema.card_fields : [];
-  const detailFields = Array.isArray(displaySchema.detail_fields) ? displaySchema.detail_fields : [];
-  const detailRows = detailFields
-    .map((field) => {
-      const value = getDisplayValue(product, field.key);
-      return {
-        key: field.key,
-        label: field.label || field.key,
-        type: field.type || 'text',
-        value,
-        formatted: formatFieldValue(value, field.type || 'text'),
-      };
-    })
-    .filter((row) => {
-      if (row.type === 'list') return Array.isArray(row.value) ? row.value.length > 0 : Boolean(row.formatted);
-      return Boolean(row.formatted);
-    });
-
+  const isMovie = product.category === 'movies';
+  const hasPrice = typeof product.price_min === 'number' || typeof product.price_max === 'number';
+  const hasValue = (value) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim() !== '';
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  };
+  const attributes = Object.entries(product.attributes || {})
+    .filter(([, value]) => hasValue(value))
+    .slice(0, 5);
   const featureTokens = [...(product.meta_badges || []), ...(product.tags || []).slice(0, 4)].slice(0, 6);
+
+  const formatAttrValue = (value) => {
+    if (Array.isArray(value)) {
+      return value.slice(0, 2).join(', ');
+    }
+    return String(value);
+  };
 
   return (
     <button
@@ -84,7 +48,7 @@ export default function ProductCard({
           }}
           aria-label={dismissed ? 'Undo less like this' : 'Less like this'}
         >
-          x
+          ×
         </button>
       )}
       {mode === 'visual' && (
@@ -101,34 +65,20 @@ export default function ProductCard({
         <h3>{product.title}</h3>
         <p className="muted">{product.subtitle || product.vendor || 'Unknown'}</p>
 
-        {mode === 'visual' && cardFields.length > 0 && (
-          <div className="feature-list card-feature-list">
-            {cardFields.map((field) => {
-              const value = getDisplayValue(product, field.key);
-              const formatted = formatFieldValue(value, field.type || 'text');
-              if (!formatted) return null;
-              return (
-                <p key={field.key}>
-                  <strong>{field.label || field.key}</strong>: {formatted}
-                </p>
-              );
-            })}
-          </div>
-        )}
-
-        {mode === 'visual' && featureTokens.length > 0 && (
+        {mode === 'visual' && hasPrice && !isMovie && <p className="price">{formatPrice(product.price_min, product.price_max)}</p>}
+        {mode === 'visual' && isMovie && product.meta_badges?.length > 0 && (
           <div className="tag-list">
-            {featureTokens.map((token) => (
-              <span key={token}>{token}</span>
+            {product.meta_badges.map((badge) => (
+              <span key={badge}>{badge}</span>
             ))}
           </div>
         )}
 
-        {mode === 'feature' && detailRows.length > 0 && (
+        {mode === 'feature' && attributes.length > 0 && (
           <div className="feature-list">
-            {detailRows.map((row) => (
-              <p key={row.key}>
-                <strong>{row.label}</strong>: {row.formatted}
+            {attributes.map(([key, value]) => (
+              <p key={key}>
+                <strong>{key.replace(/_/g, ' ')}</strong>: {formatAttrValue(value)}
               </p>
             ))}
           </div>
@@ -138,16 +88,6 @@ export default function ProductCard({
           <div className="tag-list">
             {featureTokens.map((token) => (
               <span key={token}>{token}</span>
-            ))}
-          </div>
-        )}
-
-        {detailRows.length > 0 && (
-          <div className="card-hover-detail">
-            {detailRows.map((row) => (
-              <p key={row.key}>
-                <strong>{row.label}</strong>: {row.formatted}
-              </p>
             ))}
           </div>
         )}
