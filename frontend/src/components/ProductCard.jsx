@@ -1,7 +1,6 @@
 import React from 'react';
 import { formatPrice } from '../lib/api';
 
-<<<<<<< HEAD
 function getDisplayValue(product, key) {
   if (key === 'price') {
     return formatPrice(product.price_min, product.price_max);
@@ -16,31 +15,6 @@ function getDisplayValue(product, key) {
   }
   return product[key] ?? product.attributes?.[key] ?? null;
 }
-=======
-export default function ProductCard({
-  product,
-  mode,
-  selected,
-  onClick,
-  compact = false,
-  showDismiss = false,
-  dismissed = false,
-  onToggleDismiss,
-}) {
-  const isMovie = product.category === 'movies';
-  const hasPrice = typeof product.price_min === 'number' || typeof product.price_max === 'number';
-  const hasValue = (value) => {
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'string') return value.trim() !== '';
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === 'object') return Object.keys(value).length > 0;
-    return true;
-  };
-  const attributes = Object.entries(product.attributes || {})
-    .filter(([, value]) => hasValue(value))
-    .slice(0, 5);
-  const featureTokens = [...(product.meta_badges || []), ...(product.tags || []).slice(0, 4)].slice(0, 6);
->>>>>>> 1f90faa389badd944d4f8c625ed0a0a736da73ad
 
 function formatFieldValue(value, type) {
   if (value === null || value === undefined || value === '') return '';
@@ -70,6 +44,9 @@ export default function ProductCard({
   onClick,
   hoverPanelSide = null,
   compact = false,
+  showDismiss = false,
+  dismissed = false,
+  onToggleDismiss,
 }) {
   const cardFields = Array.isArray(displaySchema.card_fields) ? displaySchema.card_fields : [];
   const detailFields = Array.isArray(displaySchema.detail_fields) ? displaySchema.detail_fields : [];
@@ -94,11 +71,7 @@ export default function ProductCard({
   return (
     <button
       type="button"
-<<<<<<< HEAD
-      className={`product-card mode-${mode} ${selected ? 'selected' : ''} ${compact ? 'compact' : ''} ${hoverPanelSide ? `hover-panel-${hoverPanelSide}` : ''}`}
-=======
       className={`product-card mode-${mode} ${selected ? 'selected' : ''} ${compact ? 'compact' : ''} ${dismissed ? 'dismissed' : ''}`}
->>>>>>> 1f90faa389badd944d4f8c625ed0a0a736da73ad
       onClick={onClick}
     >
       {showDismiss && (
@@ -111,7 +84,7 @@ export default function ProductCard({
           }}
           aria-label={dismissed ? 'Undo less like this' : 'Less like this'}
         >
-          ×
+          x
         </button>
       )}
       {mode === 'visual' && (
