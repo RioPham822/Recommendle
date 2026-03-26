@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..category_profiles import (
     category_copy,
     get_category_profile,
+    extract_feature_tokens,
 )
 from ..category_profiles import humanize_feature as profile_humanize_feature
 from ..category_profiles import humanize_feature_list as profile_humanize_feature_list
@@ -44,7 +45,19 @@ class GamePlayMixin:
         pool_ids = game.get("onboarding_pool_ids") or []
         if not pool_ids:
             all_products = await self._all_products_for_onboarding_sample(db, category)
-            pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
+            mode = str(game.get("mode") or "classic").lower()
+            if mode == "beta":
+                model = await self._ensure_model(db)
+                state = game.get("model_state") or model.init_state()
+                self._align_state_to_feature_space(model, state)
+                has_seed = bool(state.get("seeded"))
+                has_signal = any(abs(v) > 0.01 for v in state.get("user_vec", []))
+                if has_seed or has_signal:
+                    pool_ids = self._seeded_onboarding_sample(all_products, game_id, category, model, state)
+                else:
+                    pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
+            else:
+                pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
             game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
             if game_row:
                 game_row.onboarding_pool_ids = pool_ids
@@ -173,12 +186,16 @@ class GamePlayMixin:
 
         selected_ids = await self._current_selection_sequence(db, game)
         used = set(selected_ids)
+        disliked_ids = set(state.get("disliked_ids") or [])
+        disliked_tokens = set(state.get("disliked_tokens") or [])
         all_products = await self._all_products_for_scoring(db, category)
-        candidates_source = [p for p in all_products if str(p["_id"]) not in used]
+        candidates_source = [
+            p for p in all_products if str(p["_id"]) not in used and str(p["_id"]) not in disliked_ids
+        ]
         if len(candidates_source) < 10:
             raise ValueError("Not enough products left to generate a round")
 
-        scored = self._rank_candidates(model, state, candidates_source)
+        scored = self._rank_candidates(model, state, candidates_source, category, disliked_tokens)
         candidate_ids = self._build_round_candidates(game_id, round_number, scored)
         candidate_products = await self._get_products_by_ids(
             db,
@@ -225,6 +242,7 @@ class GamePlayMixin:
         game_id: str,
         round_number: int,
         product_id: str,
+        less_like_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Score a human pick against AI predictions and finalize round state."""
         game = await self._get_game(db, game_id)
@@ -262,6 +280,23 @@ class GamePlayMixin:
 
         state = game.get("model_state") or model.init_state()
         self._align_state_to_feature_space(model, state)
+        less_like_ids = [pid for pid in (less_like_ids or []) if pid != product_id]
+        if less_like_ids:
+            products = await self._get_products_by_ids(
+                db,
+                less_like_ids,
+                projection=self._feature_projection(category),
+            )
+            disliked_ids = set(state.get("disliked_ids") or [])
+            disliked_tokens = set(state.get("disliked_tokens") or [])
+            for product in products:
+                pid = str(product.get("_id"))
+                disliked_ids.add(pid)
+                model.update_with_negative_feedback(state, product, weight=0.6)
+                tokens, _ = extract_feature_tokens(product, category)
+                disliked_tokens.update(tokens)
+            state["disliked_ids"] = list(disliked_ids)
+            state["disliked_tokens"] = list(disliked_tokens)
         item_vectors = self.recommender.item_vectors
         item_norms = self.recommender.item_norms
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
@@ -424,4 +459,93 @@ class GamePlayMixin:
             },
             "post_round_metrics": post_metrics,
             "game_complete": game_complete,
+        }
+
+    async def refresh_round(
+        self,
+        db: AsyncSession,
+        game_id: str,
+        *,
+        less_like_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Refresh current round with a new candidate set."""
+        game = await self._get_game(db, game_id)
+        model = await self._ensure_model(db)
+        category = self._game_category(game)
+
+        if len(game.get("onboarding_selected_ids", [])) != 10:
+            raise ValueError("Onboarding is incomplete")
+        if game["current_round"] >= game["total_rounds"]:
+            raise ValueError("Game is complete")
+
+        round_number = game["current_round"] + 1
+        round_row = await db.scalar(
+            select(GameRoundRecord).where(
+                and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.round_number == round_number)
+            )
+        )
+        if round_row is None or round_row.completed:
+            raise ValueError("Round is not active")
+
+        state = game.get("model_state") or model.init_state()
+        self._align_state_to_feature_space(model, state)
+
+        less_like_ids = list(dict.fromkeys(less_like_ids or []))
+        if less_like_ids:
+            products = await self._get_products_by_ids(
+                db,
+                less_like_ids,
+                projection=self._feature_projection(category),
+            )
+            disliked_ids = set(state.get("disliked_ids") or [])
+            disliked_tokens = set(state.get("disliked_tokens") or [])
+            for product in products:
+                pid = str(product.get("_id"))
+                disliked_ids.add(pid)
+                model.update_with_negative_feedback(state, product, weight=0.6)
+                tokens, _ = extract_feature_tokens(product, category)
+                disliked_tokens.update(tokens)
+            state["disliked_ids"] = list(disliked_ids)
+            state["disliked_tokens"] = list(disliked_tokens)
+
+        selected_ids = await self._current_selection_sequence(db, game)
+        used = set(selected_ids)
+        previous_candidates = set(round_row.candidate_ids or [])
+        disliked_ids = set(state.get("disliked_ids") or [])
+        disliked_tokens = set(state.get("disliked_tokens") or [])
+        all_products = await self._all_products_for_scoring(db, category)
+        candidates_source = [
+            p
+            for p in all_products
+            if str(p["_id"]) not in used and str(p["_id"]) not in previous_candidates and str(p["_id"]) not in disliked_ids
+        ]
+        if len(candidates_source) < 10:
+            raise ValueError("Not enough products left to generate a round")
+
+        scored = self._rank_candidates(model, state, candidates_source, category, disliked_tokens)
+        candidate_ids = self._build_round_candidates(game_id, round_number, scored)
+        candidate_products = await self._get_products_by_ids(
+            db,
+            candidate_ids,
+            projection=self._card_projection(category),
+        )
+        pre_metrics = await self._metrics_for_state(db, model, state, selected_ids, category)
+
+        round_row.candidate_ids = candidate_ids
+        round_row.pre_metrics = pre_metrics
+        round_row.completed = False
+
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.status = "playing"
+            game_row.model_state = state
+            game_row.updated_at = datetime.utcnow()
+        await db.commit()
+
+        return {
+            "round_number": round_number,
+            "category": category,
+            "category_copy": category_copy(category),
+            "candidates": [self._product_card(p, category) for p in candidate_products],
+            "pre_round_metrics": pre_metrics,
         }

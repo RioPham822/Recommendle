@@ -1,7 +1,16 @@
 import React from 'react';
 import { formatPrice } from '../lib/api';
 
-export default function ProductCard({ product, mode, selected, onClick, compact = false }) {
+export default function ProductCard({
+  product,
+  mode,
+  selected,
+  onClick,
+  compact = false,
+  showDismiss = false,
+  dismissed = false,
+  onToggleDismiss,
+}) {
   const isMovie = product.category === 'movies';
   const hasPrice = typeof product.price_min === 'number' || typeof product.price_max === 'number';
   const hasValue = (value) => {
@@ -26,9 +35,22 @@ export default function ProductCard({ product, mode, selected, onClick, compact 
   return (
     <button
       type="button"
-      className={`product-card mode-${mode} ${selected ? 'selected' : ''} ${compact ? 'compact' : ''}`}
+      className={`product-card mode-${mode} ${selected ? 'selected' : ''} ${compact ? 'compact' : ''} ${dismissed ? 'dismissed' : ''}`}
       onClick={onClick}
     >
+      {showDismiss && (
+        <button
+          type="button"
+          className={`dismiss-btn ${dismissed ? 'active' : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (onToggleDismiss) onToggleDismiss();
+          }}
+          aria-label={dismissed ? 'Undo less like this' : 'Less like this'}
+        >
+          ×
+        </button>
+      )}
       {mode === 'visual' && (
         <div className="thumb-wrap">
           {product.image_url ? (

@@ -95,7 +95,13 @@ class GameInsightsMixin:
         learned_dislikes = humanize_feature_list([(n, round(w, 3)) for n, w in feature_weights if w < 0][:5])
 
         all_products = await self._all_products_for_scoring(db, category)
-        scored = self._rank_candidates(model, state, all_products)
+        disliked_tokens = set(state.get("disliked_tokens") or [])
+        selected_ids = set(await self._current_selection_sequence(db, game))
+        disliked_ids = set(state.get("disliked_ids") or [])
+        filtered_products = [
+            p for p in all_products if str(p.get("_id")) not in selected_ids and str(p.get("_id")) not in disliked_ids
+        ]
+        scored = self._rank_candidates(model, state, filtered_products, category, disliked_tokens)
         top5_recs = []
         for score, product in scored[:5]:
             card = self._product_card(product, category)
@@ -149,6 +155,7 @@ class GameInsightsMixin:
             "game_id": str(game["_id"]),
             "player_name": game["player_name"],
             "category": category,
+            "mode": game.get("mode") or "classic",
             "category_copy": category_copy(category),
             "total_rounds": total,
             "human_score": game["human_score"],
@@ -182,6 +189,7 @@ class GameInsightsMixin:
             "id": str(game["_id"]),
             "player_name": game["player_name"],
             "category": category,
+            "mode": game.get("mode") or "classic",
             "category_copy": category_copy(category),
             "status": game["status"],
             "current_round": int(game.get("current_round", 0)),

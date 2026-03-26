@@ -1,6 +1,16 @@
 import { formatPrice } from '../lib/api';
 
-function ResultCard({ label, product, variant, showScore = false }) {
+function ResultCard({
+  label,
+  product,
+  variant,
+  showScore = false,
+  showBetaActions = false,
+  whyShown = [],
+  onLessLikeThis,
+  feedbackState = 'idle',
+  showLessLikeButton = true,
+}) {
   const isMovie = product.category === 'movies';
   const priceText = formatPrice(product.price_min, product.price_max);
   const metaText = product.meta_badges?.length > 0 ? product.meta_badges.join(' · ') : '';
@@ -16,6 +26,32 @@ function ResultCard({ label, product, variant, showScore = false }) {
       {showScore && product.score != null && (
         <p className="score-pill">AI Score {product.score.toFixed(2)}</p>
       )}
+      {showBetaActions && (
+        <div className="result-actions">
+          <details>
+            <summary>Why shown?</summary>
+            {whyShown.length > 0 ? (
+              <ul>
+                {whyShown.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">Based on your recent picks.</p>
+            )}
+          </details>
+          {showLessLikeButton && (
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={onLessLikeThis}
+              disabled={feedbackState === 'sending' || feedbackState === 'sent'}
+            >
+              {feedbackState === 'sent' ? 'Feedback sent' : feedbackState === 'sending' ? 'Sending...' : 'Less like this'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -24,16 +60,29 @@ function FeatureTag({ name }) {
   return <span className="feature-tag">{name}</span>;
 }
 
-export default function RoundResultPanel({ result, categoryCopy = {}, onNext, onHome, loadingNext }) {
+export default function RoundResultPanel({ result, categoryCopy = {}, onNext, onHome, loadingNext, mode }) {
   if (!result) return null;
 
   const { ai_correct, ai_exact, ai_rank_of_pick, ai_explanation, post_round_metrics } = result;
   const singular = categoryCopy.item_singular || 'item';
+  const betaEnabled = mode === 'beta';
 
   const outcomeClass = ai_correct ? 'outcome-ai' : 'outcome-human';
   const outcomeText = ai_correct
     ? (ai_exact ? 'AI Exact Match!' : `AI Top-3 Hit (Rank #${ai_rank_of_pick})`)
     : `AI Missed - Your pick was #${ai_rank_of_pick}`;
+
+  const whyShownBase = [];
+  if (ai_explanation?.shared_features?.length) {
+    whyShownBase.push(`Shared features: ${ai_explanation.shared_features.slice(0, 3).join(', ')}`);
+  }
+  if (ai_explanation?.learned_preferences?.length) {
+    const prefs = ai_explanation.learned_preferences.slice(0, 3).map(([name]) => name);
+    if (prefs.length) {
+      whyShownBase.push(`Matches your likes: ${prefs.join(', ')}`);
+    }
+  }
+
 
   return (
     <section className="screen shell">
@@ -53,8 +102,23 @@ export default function RoundResultPanel({ result, categoryCopy = {}, onNext, on
       </header>
 
       <div className="result-grid">
-        <ResultCard label={`Your ${singular}`} product={result.human_pick} variant="human-pick" />
-        <ResultCard label={`AI's #1 ${singular}`} product={result.ai_pick} variant="ai-pick" showScore />
+        <ResultCard
+          label={`Your ${singular}`}
+          product={result.human_pick}
+          variant="human-pick"
+          showBetaActions={betaEnabled}
+          whyShown={whyShownBase}
+          showLessLikeButton={false}
+        />
+        <ResultCard
+          label={`AI's #1 ${singular}`}
+          product={result.ai_pick}
+          variant="ai-pick"
+          showScore
+          showBetaActions={betaEnabled}
+          whyShown={whyShownBase}
+          showLessLikeButton={false}
+        />
       </div>
 
       <div className="panel result-details">

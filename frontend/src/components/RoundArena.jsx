@@ -11,6 +11,10 @@ export default function RoundArena({
   selectedPick,
   onSelectPick,
   onSubmitPick,
+  lessLikeIds = [],
+  onToggleLessLike,
+  onRefresh,
+  refreshing = false,
   onHome,
   submitting,
 }) {
@@ -47,6 +51,9 @@ export default function RoundArena({
             selected={selectedPick === product.id}
             onClick={() => onSelectPick(product.id)}
             compact
+            showDismiss
+            dismissed={lessLikeIds.includes(product.id)}
+            onToggleDismiss={() => onToggleLessLike && onToggleLessLike(product.id)}
           />
         ))}
       </div>
@@ -58,6 +65,14 @@ export default function RoundArena({
           onClick={onHome}
         >
           Home
+        </button>
+        <button
+          type="button"
+          className="secondary-btn"
+          onClick={onRefresh}
+          disabled={refreshing || submitting}
+        >
+          {refreshing ? 'Refreshing...' : 'Refresh'}
         </button>
         <button
           type="button"

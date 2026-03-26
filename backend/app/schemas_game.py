@@ -36,6 +36,7 @@ class GameCreate(BaseModel):
 
     player_name: str = Field(..., min_length=1, max_length=80)
     category: str = Field(default="fountain_pens")
+    mode: str = Field(default="classic")
     fresh_start: bool = Field(default=False)
 
 
@@ -45,6 +46,7 @@ class GameOut(BaseModel):
     id: str
     player_name: str
     category: str = "fountain_pens"
+    mode: str = "classic"
     status: str
     total_rounds: int
     human_score: int
@@ -106,6 +108,43 @@ class RoundPickSubmit(BaseModel):
     """Payload for submitting one pick in a round."""
 
     product_id: str
+    less_like_ids: list[str] = Field(default_factory=list)
+
+
+class RoundRefreshSubmit(BaseModel):
+    """Payload for refreshing a round with optional less-like selections."""
+
+    less_like_ids: list[str] = Field(default_factory=list)
+
+
+class FeedbackSubmit(BaseModel):
+    """Payload for in-game feedback (beta mode)."""
+
+    product_id: str
+    action: str
+
+
+class FeedbackOut(BaseModel):
+    """Result after feedback is accepted."""
+
+    accepted: bool
+    action: str
+    product_id: str
+
+
+class SeedPreferencesSubmit(BaseModel):
+    """Payload for seeding beta preferences before onboarding."""
+
+    likes: dict[str, list[str]] = Field(default_factory=dict)
+    dislikes: dict[str, list[str]] = Field(default_factory=dict)
+    like_product_ids: list[str] = Field(default_factory=list)
+    dislike_product_ids: list[str] = Field(default_factory=list)
+
+
+class SeedPreferencesOut(BaseModel):
+    """Result after seed preferences are accepted."""
+
+    accepted: bool
 
 
 class ScoredProductCard(ProductCard):
@@ -175,6 +214,7 @@ class GameSummaryOut(BaseModel):
     game_id: str
     player_name: str
     category: str = "fountain_pens"
+    mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
     total_rounds: int
     human_score: int
@@ -195,6 +235,7 @@ class GameStatusOut(BaseModel):
     id: str
     player_name: str
     category: str = "fountain_pens"
+    mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
     status: str
     current_round: int

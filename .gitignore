@@ -74,3 +74,4 @@ backend/data/movies_export.json
 *.conf
 .coverage
 docs/Dataset docs
+decidio.dump

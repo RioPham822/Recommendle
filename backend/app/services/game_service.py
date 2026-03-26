@@ -16,6 +16,7 @@ from ..category_profiles import (
     get_category_profile,
     normalize_category,
     supported_categories,
+    extract_feature_tokens,
 )
 from ..db import (
     GameRecord,
@@ -61,6 +62,15 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             return normalize_category(game.get("category"))
         except ValueError:
             return "fountain_pens"
+
+    @staticmethod
+    def _normalize_mode(mode: str | None) -> str:
+        if mode is None:
+            return "classic"
+        normalized = str(mode).strip().lower()
+        if normalized in {"classic", "beta"}:
+            return normalized
+        raise ValueError(f"Unsupported game mode '{mode}'")
 
     @staticmethod
     def _align_state_to_feature_space(model: PrefixCFModel, state: dict[str, Any]) -> bool:
@@ -364,11 +374,57 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         rng.shuffle(chosen)
         return [str(p["_id"]) for p in chosen]
 
+    def _seeded_onboarding_sample(
+        self,
+        all_products: list[dict[str, Any]],
+        game_id: str,
+        category: str,
+        model: PrefixCFModel,
+        state: dict[str, Any],
+    ) -> list[str]:
+        """Create a 50-item onboarding pool biased by seed preferences."""
+        if len(all_products) <= 50:
+            return [str(p["_id"]) for p in all_products]
+        rng = self._rng_for(game_id, 0, "onboarding_seeded")
+        disliked_tokens = set(state.get("disliked_tokens") or [])
+        scored = self._rank_candidates(model, state, all_products, category, disliked_tokens)
+
+        likely = scored[:60]
+        tail = scored[60:]
+
+        selected_ids: list[str] = []
+        selected_set: set[str] = set()
+
+        def add_from_pool(pool: list[tuple[float, dict[str, Any]]], target: int) -> None:
+            pool_items = list(pool)
+            rng.shuffle(pool_items)
+            for _, product in pool_items:
+                pid = str(product["_id"])
+                if pid in selected_set:
+                    continue
+                selected_set.add(pid)
+                selected_ids.append(pid)
+                if len(selected_ids) >= target:
+                    return
+
+        add_from_pool(likely, 30)
+        add_from_pool(tail, 50)
+        if len(selected_ids) < 50:
+            remainder = [str(p["_id"]) for _, p in scored if str(p["_id"]) not in selected_set]
+            rng.shuffle(remainder)
+            selected_ids.extend(remainder[: 50 - len(selected_ids)])
+
+        selected_ids = selected_ids[:50]
+        rng.shuffle(selected_ids)
+        return selected_ids
+
     def _rank_candidates(
         self,
         model: PrefixCFModel,
         state: dict[str, Any],
         products: list[dict[str, Any]],
+        category: str,
+        disliked_tokens: set[str] | None = None,
     ) -> list[tuple[float, dict[str, Any]]]:
         """Score and rank products against current user preference state."""
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
@@ -398,7 +454,13 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                     item_norms[pid] = item_norm
                 denom = user_norm * item_norm
                 similarity = float(np.dot(user_vec, vec) / denom) if denom > 0 else 0.0
-            score = float(min(5.0, max(1.0, 3.0 + 1.7 * similarity + bias)))
+            score = 3.0 + 1.7 * similarity + bias
+            if disliked_tokens:
+                tokens, _ = extract_feature_tokens(product, category)
+                overlap = len(disliked_tokens.intersection(tokens))
+                if overlap:
+                    score -= min(1.0, overlap * 0.15)
+            score = float(min(5.0, max(1.0, score)))
             scored.append((score, product))
         scored.sort(key=lambda item: (item[0], str(item[1]["_id"])), reverse=True)
         return scored
@@ -472,6 +534,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         db: AsyncSession,
         player_name: str,
         category: str = "fountain_pens",
+        mode: str = "classic",
         total_rounds: int = 5,
         fresh_start: bool = False,
     ) -> dict[str, Any]:
@@ -479,6 +542,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         await self._ensure_indexes(db)
         model = await self._ensure_model(db)
         normalized_category = normalize_category(category)
+        normalized_mode = self._normalize_mode(mode)
         clean_name = player_name.strip()
         if not clean_name:
             raise ValueError("Player name is required")
@@ -503,6 +567,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 existing_game.total_rounds = total_rounds
                 existing_game.human_score = 0
                 existing_game.ai_score = 0
+                existing_game.mode = normalized_mode
                 existing_game.model_state = model.init_state()
                 existing_game.onboarding_pool_ids = []
                 existing_game.onboarding_selected_ids = []
@@ -514,6 +579,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                     "id": existing_game.id,
                     "player_name": existing_game.player_name,
                     "category": normalized_category,
+                    "mode": existing_game.mode or normalized_mode,
                     "status": existing_game.status,
                     "total_rounds": int(existing_game.total_rounds or total_rounds),
                     "human_score": int(existing_game.human_score or 0),
@@ -527,6 +593,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                     "id": existing_game.id,
                     "player_name": existing_game.player_name,
                     "category": normalized_category,
+                    "mode": existing_game.mode or normalized_mode,
                     "status": existing_game.status,
                     "total_rounds": int(existing_game.total_rounds or total_rounds),
                     "human_score": int(existing_game.human_score or 0),
@@ -547,6 +614,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 existing_game.total_rounds = total_rounds
                 existing_game.human_score = 0
                 existing_game.ai_score = 0
+                existing_game.mode = normalized_mode
                 existing_game.model_state = model.init_state()
                 existing_game.onboarding_pool_ids = []
                 existing_game.onboarding_selected_ids = []
@@ -558,6 +626,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 "id": existing_game.id,
                 "player_name": existing_game.player_name,
                 "category": normalized_category,
+                "mode": existing_game.mode or normalized_mode,
                 "status": existing_game.status,
                 "total_rounds": int(existing_game.total_rounds or total_rounds),
                 "human_score": int(existing_game.human_score or 0),
@@ -570,6 +639,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             schema_version=2,
             player_name=clean_name,
             category=normalized_category,
+            mode=normalized_mode,
             status="onboarding",
             current_round=0,
             total_rounds=total_rounds,
@@ -589,6 +659,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             "id": game.id,
             "player_name": game.player_name,
             "category": normalized_category,
+            "mode": normalized_mode,
             "status": game.status,
             "total_rounds": game.total_rounds,
             "human_score": game.human_score,
@@ -596,6 +667,136 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             "created_at": game.created_at,
             "resumed": False,
         }
+
+    async def submit_feedback(
+        self,
+        db: AsyncSession,
+        game_id: str,
+        product_id: str,
+        action: str,
+    ) -> dict[str, Any]:
+        """Apply beta feedback signals such as 'less like this'."""
+        game = await self._get_game(db, game_id)
+        model = await self._ensure_model(db)
+        category = self._game_category(game)
+        mode = self._normalize_mode(game.get("mode"))
+        if mode != "beta":
+            raise ValueError("Feedback is only available in beta mode")
+
+        normalized_action = str(action or "").strip().lower()
+        if normalized_action != "less_like_this":
+            raise ValueError("Unsupported feedback action")
+
+        products = await self._get_products_by_ids(
+            db,
+            [product_id],
+            projection=self._feature_projection(category),
+        )
+        if not products:
+            raise ValueError("Selected product does not exist")
+
+        product = products[0]
+        state = game.get("model_state") or model.init_state()
+        self._align_state_to_feature_space(model, state)
+        model.update_with_negative_feedback(state, product)
+
+        disliked_ids = set(state.get("disliked_ids") or [])
+        disliked_ids.add(product_id)
+        state["disliked_ids"] = list(disliked_ids)
+
+        tokens, _ = extract_feature_tokens(product, category)
+        disliked_tokens = set(state.get("disliked_tokens") or [])
+        disliked_tokens.update(tokens)
+        state["disliked_tokens"] = list(disliked_tokens)
+
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.model_state = state
+            game_row.updated_at = datetime.utcnow()
+        await db.commit()
+
+        return {
+            "accepted": True,
+            "action": normalized_action,
+            "product_id": product_id,
+        }
+
+    async def submit_seed_preferences(
+        self,
+        db: AsyncSession,
+        game_id: str,
+        likes: dict[str, list[str]] | None = None,
+        dislikes: dict[str, list[str]] | None = None,
+        like_product_ids: list[str] | None = None,
+        dislike_product_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Apply beta seed preferences before onboarding."""
+        game = await self._get_game(db, game_id)
+        model = await self._ensure_model(db)
+        category = self._game_category(game)
+        mode = self._normalize_mode(game.get("mode"))
+        if mode != "beta":
+            raise ValueError("Seeding is only available in beta mode")
+
+        likes = likes or {}
+        dislikes = dislikes or {}
+        like_product_ids = like_product_ids or []
+        dislike_product_ids = dislike_product_ids or []
+
+        state = game.get("model_state") or model.init_state()
+        self._align_state_to_feature_space(model, state)
+
+        def build_seed_product(source: dict[str, list[str]]) -> dict[str, Any]:
+            payload: dict[str, Any] = {"category": category}
+            for key, values in source.items():
+                if not values:
+                    continue
+                payload[key] = values
+            return payload
+
+        if likes:
+            product = build_seed_product(likes)
+            model.update_with_seed(state, product, weight=0.45)
+
+        if dislikes:
+            product = build_seed_product(dislikes)
+            model.update_with_negative_feedback(state, product, weight=0.45)
+            tokens, _ = extract_feature_tokens(product, category)
+            disliked_tokens = set(state.get("disliked_tokens") or [])
+            disliked_tokens.update(tokens)
+            state["disliked_tokens"] = list(disliked_tokens)
+
+        if like_product_ids:
+            products = await self._get_products_by_ids(
+                db,
+                like_product_ids,
+                projection=self._feature_projection(category),
+            )
+            for product in products:
+                model.update_with_seed(state, product, weight=0.6)
+
+        if dislike_product_ids:
+            products = await self._get_products_by_ids(
+                db,
+                dislike_product_ids,
+                projection=self._feature_projection(category),
+            )
+            disliked_tokens = set(state.get("disliked_tokens") or [])
+            for product in products:
+                model.update_with_negative_feedback(state, product, weight=0.6)
+                tokens, _ = extract_feature_tokens(product, category)
+                disliked_tokens.update(tokens)
+            state["disliked_tokens"] = list(disliked_tokens)
+
+        state["seeded"] = True
+
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.model_state = state
+            game_row.updated_at = datetime.utcnow()
+        await db.commit()
+
+        return {"accepted": True}
 
     async def get_resume_state(
         self,

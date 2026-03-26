@@ -4,6 +4,7 @@ import logoDark from './assets/logo-dark.svg';
 import AuthScreen from './components/AuthScreen';
 import AccountMenu from './components/AccountMenu';
 import BrainModePanel from './components/BrainModePanel';
+import BetaSeedScreen from './components/BetaSeedScreen';
 import FinalSummary from './components/FinalSummary';
 import OnboardingGrid from './components/OnboardingGrid';
 import PlayerStatsModal from './components/PlayerStatsModal';
@@ -18,22 +19,25 @@ import {
   getResumeState,
   startGame,
   startRound,
+  refreshRound,
+  submitSeedPreferences,
   submitOnboarding,
-    submitRoundPick,
-    logoutUser,
-    getAuthToken,
-    getUserId,
-    getDisplayName,
-    clearAuthData,
+  submitRoundPick,
+  logoutUser,
+  getAuthToken,
+  getUserId,
+  getDisplayName,
+  clearAuthData,
 } from './lib/api';
 
-const VIEW = {
-  WELCOME: 'welcome',
-  ONBOARDING: 'onboarding',
-  ROUND: 'round',
-  RESULT: 'result',
-  FINAL: 'final',
-};
+  const VIEW = {
+    WELCOME: 'welcome',
+    SEED: 'seed',
+    ONBOARDING: 'onboarding',
+    ROUND: 'round',
+    RESULT: 'result',
+    FINAL: 'final',
+  };
 const THEME_STORAGE_KEY = 'recommendle-theme';
 const MIN_CATEGORY_ITEMS = 50;
 const CATEGORY_RETRY_MS = 2500;
@@ -64,6 +68,7 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('fountain_pens');
+  const [gameMode, setGameMode] = useState('classic');
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoryLoadError, setCategoryLoadError] = useState('');
   const [game, setGame] = useState(null);
@@ -74,6 +79,9 @@ export default function App() {
   const [roundData, setRoundData] = useState(null);
   const [selectedRoundPick, setSelectedRoundPick] = useState('');
   const [roundResult, setRoundResult] = useState(null);
+  const [lessLikeIds, setLessLikeIds] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [seedBusy, setSeedBusy] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
   const [mode, setMode] = useState('visual');
   const [error, setError] = useState('');
@@ -276,6 +284,7 @@ export default function App() {
     const round = await startRound(gameId);
     setRoundData(round);
     setSelectedRoundPick('');
+    setLessLikeIds([]);
     setView(VIEW.ROUND);
   }
 
@@ -288,13 +297,18 @@ export default function App() {
     }
     setBusy((prev) => ({ ...prev, start: true }));
     try {
-      const created = await startGame(playerName, selectedCategory, freshStart);
+      const created = await startGame(playerName, selectedCategory, freshStart, gameMode);
       setGame(created);
+      setGameMode(created.mode || gameMode);
       setSelectedIds([]);
       if (created.status === VIEW.ONBOARDING) {
-        const onboardingPayload = await getOnboarding(created.id);
-        setOnboarding(onboardingPayload);
-        setView(VIEW.ONBOARDING);
+        if (created.mode === 'beta' && !created.resumed) {
+          setView(VIEW.SEED);
+        } else {
+          const onboardingPayload = await getOnboarding(created.id);
+          setOnboarding(onboardingPayload);
+          setView(VIEW.ONBOARDING);
+        }
       } else {
         setOnboarding(null);
         await loadNextRound(created.id);
@@ -338,6 +352,38 @@ export default function App() {
     }
   }
 
+  async function handleSeedSubmit(payload) {
+    if (!game) return;
+    setSeedBusy(true);
+    try {
+      await submitSeedPreferences(
+        game.id,
+        payload.likes,
+        payload.dislikes,
+        payload.like_product_ids || [],
+        payload.dislike_product_ids || [],
+      );
+      const onboardingPayload = await getOnboarding(game.id);
+      setOnboarding(onboardingPayload);
+      setView(VIEW.ONBOARDING);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSeedBusy(false);
+    }
+  }
+
+  async function handleSeedSkip() {
+    if (!game) return;
+    try {
+      const onboardingPayload = await getOnboarding(game.id);
+      setOnboarding(onboardingPayload);
+      setView(VIEW.ONBOARDING);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function handleSubmitRoundPick() {
     if (!game || !roundData || !selectedRoundPick) {
       return;
@@ -346,7 +392,7 @@ export default function App() {
     setError('');
     setBusy((prev) => ({ ...prev, pick: true }));
     try {
-      const result = await submitRoundPick(game.id, roundData.round_number, selectedRoundPick);
+      const result = await submitRoundPick(game.id, roundData.round_number, selectedRoundPick, lessLikeIds);
       setRoundResult(result);
       setGame((prev) => ({
         ...prev,
@@ -358,6 +404,21 @@ export default function App() {
       setError(err.message);
     } finally {
       setBusy((prev) => ({ ...prev, pick: false }));
+    }
+  }
+
+  async function handleRefreshRound() {
+    if (!game) return;
+    setRefreshing(true);
+    try {
+      const round = await refreshRound(game.id, lessLikeIds);
+      setRoundData(round);
+      setSelectedRoundPick('');
+      setLessLikeIds([]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -454,6 +515,8 @@ export default function App() {
               categories={categories}
               selectedCategory={selectedCategory}
               setSelectedCategory={setSelectedCategory}
+              gameMode={gameMode}
+              setGameMode={setGameMode}
               onStart={() => handleStart(false)}
               onStartFresh={() => handleStart(true)}
               resumable={resumableGame}
@@ -499,6 +562,15 @@ export default function App() {
             </>
           )}
 
+          {view === VIEW.SEED && (
+            <BetaSeedScreen
+              category={activeCategory}
+              onSkip={handleSeedSkip}
+              onSubmit={handleSeedSubmit}
+              loading={seedBusy}
+            />
+          )}
+
           {view === VIEW.ROUND && (
             <RoundArena
               round={roundData}
@@ -510,6 +582,14 @@ export default function App() {
               selectedPick={selectedRoundPick}
               onSelectPick={setSelectedRoundPick}
               onSubmitPick={handleSubmitRoundPick}
+              lessLikeIds={lessLikeIds}
+              onToggleLessLike={(id) => {
+                setLessLikeIds((prev) =>
+                  prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
+                );
+              }}
+              onRefresh={handleRefreshRound}
+              refreshing={refreshing}
               onHome={resetAll}
               submitting={busy.pick}
             />
@@ -519,6 +599,7 @@ export default function App() {
             <RoundResultPanel
               result={roundResult}
               categoryCopy={roundResult?.category_copy || {}}
+              mode={game?.mode || gameMode}
               onNext={handleResultNext}
               onHome={resetAll}
               loadingNext={busy.next}

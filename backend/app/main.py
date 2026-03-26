@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -10,7 +11,8 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import Float, and_, cast, select
+from difflib import SequenceMatcher
+from sqlalchemy import Float, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .category_profiles import normalize_category
@@ -108,6 +110,53 @@ async def list_products(
     result = await db.execute(stmt)
     products = [record_to_dict(row) for row in result.scalars().all()]
     return [ProductOut.from_record(Product(**p)) for p in products]
+
+
+def _normalize_text(text: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", " ", text.lower())
+    return cleaned.strip()
+
+
+@app.get("/api/products/search", response_model=list[ProductOut])
+async def search_products(
+    q: str,
+    category: str = "movies",
+    limit: int = 12,
+    fuzzy: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """Search products by title with optional fuzzy matching."""
+    query = _normalize_text(q or "")
+    if len(query) < 2:
+        return []
+    try:
+        normalized = normalize_category(category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tokens = query.split()
+    filters = [ProductRecord.category == normalized]
+    if tokens:
+        token_filters = [ProductRecord.data["title"].as_string().ilike(f"%{token}%") for token in tokens]
+        filters.append(or_(*token_filters))
+    stmt = select(ProductRecord).where(and_(*filters))
+    pool_limit = max(40, min(200, int(limit) * 8))
+    stmt = stmt.limit(pool_limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    products = [record_to_dict(row) for row in rows]
+
+    if not fuzzy:
+        return [ProductOut.from_record(Product(**p)) for p in products[:limit]]
+
+    def score_for(product: dict) -> float:
+        title = _normalize_text(str(product.get("title") or ""))
+        ratio = SequenceMatcher(None, query, title).ratio()
+        if tokens and all(token in title for token in tokens):
+            ratio += 0.15
+        return ratio
+
+    scored = sorted(products, key=score_for, reverse=True)
+    return [ProductOut.from_record(Product(**p)) for p in scored[:limit]]
 
 
 @app.get("/api/products/{product_id}", response_model=ProductOut)

@@ -113,6 +113,22 @@ class PrefixCFModel:
         state["user_vec"] = updated.tolist()
         state["count"] = int(state.get("count", 0)) + 1
 
+    def update_with_negative_feedback(self, state: dict, product: Product, weight: float = 0.6) -> None:
+        """Apply negative feedback to reduce affinity for an item and its features."""
+        vec = self.feature_space.vectorize(product)
+        user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
+        decay = float(state.get("decay", 0.85))
+        updated = decay * user_vec - weight * vec
+        state["user_vec"] = updated.tolist()
+        state["neg_count"] = int(state.get("neg_count", 0)) + 1
+
+    def update_with_seed(self, state: dict, product: Product, weight: float = 0.45) -> None:
+        """Seed initial preference vector without incrementing selection count."""
+        vec = self.feature_space.vectorize(product)
+        user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
+        updated = user_vec + weight * vec
+        state["user_vec"] = updated.tolist()
+
     def update_with_prefix_rating(self, state: dict, rating: int) -> None:
         """Adjust model bias using explicit onboarding rating feedback."""
         predicted = self.predict_prefix_rating(state)
