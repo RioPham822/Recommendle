@@ -11,13 +11,25 @@
   --decidio-navy: #1c277a;
   --decidio-blue: #3a6fac;
   --decidio-green: #51914b;
-  --brand-sequence: linear-gradient(90deg, var(--decidio-yellow) 0%, var(--decidio-orange) 16%, var(--decidio-red) 32%, var(--decidio-purple) 48%, var(--decidio-navy) 64%, var(--decidio-blue) 82%, var(--decidio-green) 100%);
-  --brand-sequence-soft: linear-gradient(125deg, rgba(232, 144, 53, 0.12) 0%, rgba(222, 84, 43, 0.12) 18%, rgba(184, 54, 61, 0.12) 34%, rgba(139, 41, 104, 0.11) 50%, rgba(28, 39, 122, 0.1) 66%, rgba(58, 111, 172, 0.1) 84%, rgba(81, 145, 75, 0.12) 100%);
+  --brand-sequence: var(--decidio-navy);
+  --brand-sequence-soft: #eef2fb;
+  --primary: var(--decidio-navy);
+  --primary-soft: #e8ebf8;
+  --secondary: var(--decidio-blue);
+  --secondary-soft: #e8f0fa;
+  --warning: var(--decidio-orange);
+  --warning-soft: #fde9dc;
+  --danger: var(--decidio-red);
+  --danger-soft: #fde9ea;
+  --accent: var(--decidio-purple);
+  --accent-soft: #f6e6f1;
+  --highlight: var(--decidio-yellow);
+  --highlight-soft: #fdf1e1;
 
   --correct: var(--decidio-green);
   --correct-soft: #eaf5e8;
-  --present: var(--decidio-blue);
-  --present-soft: #e8f0fa;
+  --present: var(--secondary);
+  --present-soft: var(--secondary-soft);
   --absent: var(--decidio-navy);
   --absent-soft: #e7ebf8;
   --accent-hidden: var(--decidio-purple);
@@ -61,7 +73,7 @@ body[data-theme='dark'] {
   --border-strong: #3c4360;
   --modal-backdrop: rgba(0, 0, 0, 0.82);
 
-  --page-bg: radial-gradient(circle at 20% 0%, rgba(222, 84, 43, 0.14), transparent 28%), radial-gradient(circle at 100% 18%, rgba(58, 111, 172, 0.14), transparent 24%), #000000;
+  --page-bg: #000000;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
@@ -96,7 +108,7 @@ button, input {
 button {
   border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
-  background: var(--brand-sequence);
+  background: var(--primary);
   color: #fff;
   border-radius: var(--radius);
   padding: 0.8rem 1.4rem;
@@ -104,14 +116,14 @@ button {
   font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  transition: opacity 120ms ease, transform 100ms ease, box-shadow 120ms ease;
-  box-shadow: 0 6px 16px rgba(14, 19, 49, 0.24);
+  transition: opacity 120ms ease;
+  box-shadow: none;
 }
 
 button:hover {
   opacity: 0.95;
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(14, 19, 49, 0.3);
+  transform: none;
+  box-shadow: none;
 }
 
 .theme-toggle {
@@ -222,10 +234,7 @@ input:focus {
   align-items: center;
   justify-content: center;
   padding: 1rem 0;
-  border-bottom: 1px solid transparent;
-  background-image: linear-gradient(var(--surface-translucent), var(--surface-translucent)), var(--brand-sequence);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
+  border-bottom: 2px solid var(--primary);
   margin-bottom: 1.5rem;
   gap: 0.75rem;
 }
@@ -276,7 +285,7 @@ input:focus {
   top: 0;
   width: 100%;
   height: 3px;
-  background: var(--brand-sequence);
+  background: var(--primary);
   opacity: 0.95;
   pointer-events: none;
 }
@@ -412,8 +421,8 @@ input:focus {
 }
 
 .mode-pill.active {
-  background: var(--brand-sequence);
-  border-color: transparent;
+  background: var(--primary);
+  border-color: var(--primary);
   color: #fff;
 }
 
@@ -467,8 +476,8 @@ input:focus {
 }
 
 .seed-chip.selected {
-  background: var(--brand-sequence);
-  border-color: transparent;
+  background: var(--secondary);
+  border-color: var(--secondary);
   color: #fff;
 }
 
@@ -494,6 +503,23 @@ input:focus {
   flex-wrap: wrap;
 }
 
+.seed-dropzones {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.seed-dropzone {
+  background: var(--surface-alt);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+}
+
+.seed-empty {
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+}
+
 .seed-results {
   display: grid;
   gap: 0.4rem;
@@ -512,6 +538,12 @@ input:focus {
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   position: relative;
+}
+
+.seed-result-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .seed-result-main {
@@ -653,7 +685,7 @@ input:focus {
   height: 100%;
   width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--present), var(--correct));
+  background: var(--secondary);
   transition: width 220ms ease;
 }
 
@@ -769,9 +801,9 @@ input:focus {
 }
 
 .mode-buttons button.active {
-  background: var(--brand-sequence);
+  background: var(--accent);
   color: #fff;
-  border-color: transparent;
+  border-color: var(--accent);
 }
 
 .mode-caption {
@@ -1011,7 +1043,7 @@ input:focus {
   font-size: 0.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  background: var(--brand-sequence-soft);
+  background: var(--primary-soft);
   border: 1px solid var(--border-strong);
 }
 
@@ -1558,14 +1590,7 @@ input:focus {
 
 /* Score pill shimmer */
 .score-pill {
-  background-size: 200% 100%;
-  background-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255,255,255,0.15) 50%,
-    transparent 100%
-  );
-  animation: shimmer 2.5s ease-in-out 1s 1;
+  animation: none;
 }
 
 /* ── Responsive ─────────────────────────────────────── */
@@ -1683,7 +1708,7 @@ input:focus {
 }
 
 .hidden-gems-panel {
-  background: linear-gradient(135deg, #f9edf6 0%, #f3e1ef 50%, #fdebf4 100%);
+  background: var(--accent-soft);
   border-color: var(--decidio-purple);
 }
 
@@ -1902,7 +1927,7 @@ input:focus {
 }
 
 .leaderboard-row-clickable:hover {
-  background: var(--brand-sequence-soft);
+  background: var(--secondary-soft);
 }
 
 .leaderboard-row-clickable .player-name-cell {
@@ -2138,7 +2163,7 @@ body[data-theme='dark'] .scoreline span:last-child {
 }
 
 body[data-theme='dark'] .hidden-gems-panel {
-  background: linear-gradient(135deg, #2c1631 0%, #22122b 50%, #160d22 100%);
+  background: #211625;
 }
 
 body[data-theme='dark'] .feature-tag.negative {

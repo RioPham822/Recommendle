@@ -10,7 +10,6 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
-  const [target, setTarget] = useState('like');
   const maxSelections = 5;
 
   const config = useMemo(() => {
@@ -84,16 +83,14 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
     };
   }, [query, category]);
 
-  const addMovie = (movie) => {
-    if (target === 'like') {
-      if (likeMovies.some((m) => m.id === movie.id)) return;
-      setLikeMovies((prev) => [...prev, movie].slice(0, 5));
-      setDislikeMovies((prev) => prev.filter((m) => m.id !== movie.id));
-    } else {
-      if (dislikeMovies.some((m) => m.id === movie.id)) return;
-      setDislikeMovies((prev) => [...prev, movie].slice(0, 5));
-      setLikeMovies((prev) => prev.filter((m) => m.id !== movie.id));
+  const addMovie = (movie, list, setter, otherList, otherSetter) => {
+    if (list.some((m) => m.id === movie.id)) return;
+    if (list.length >= maxSelections) return;
+    setter([...list, movie]);
+    if (otherList.some((m) => m.id === movie.id)) {
+      otherSetter(otherList.filter((m) => m.id !== movie.id));
     }
+    setResults((prev) => prev.filter((m) => m.id !== movie.id));
   };
 
   const removeMovie = (movieId, list, setter) => {
@@ -126,7 +123,7 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
                 type="button"
                 className={`seed-chip ${likes.includes(option) ? 'selected' : ''}`}
                 onClick={() => toggleSelection(option, likes, setLikes, dislikes, setDislikes)}
-                disabled={loading}
+                disabled={loading || dislikes.includes(option)}
               >
                 {option}
               </button>
@@ -144,7 +141,7 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
                 type="button"
                 className={`seed-chip ${dislikes.includes(option) ? 'selected' : ''}`}
                 onClick={() => toggleSelection(option, dislikes, setDislikes, likes, setLikes)}
-                disabled={loading}
+                disabled={loading || likes.includes(option)}
               >
                 {option}
               </button>
@@ -159,39 +156,51 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search titles (fuzzy search enabled)"
+              placeholder="Search titles"
               disabled={loading}
             />
           </div>
           {searching && <p className="seed-help">Searching...</p>}
-          <div className="seed-target">
-            <button
-              type="button"
-              className={`seed-chip ${target === 'like' ? 'selected' : ''}`}
-              onClick={() => setTarget('like')}
-              disabled={loading}
-            >
-              Add to Likes
-            </button>
-            <button
-              type="button"
-              className={`seed-chip ${target === 'dislike' ? 'selected' : ''}`}
-              onClick={() => setTarget('dislike')}
-              disabled={loading}
-            >
-              Add to Less of
-            </button>
+          <div className="seed-dropzones">
+            <div className="seed-dropzone">
+              <p className="seed-help">Add to Likes ({likeMovies.length}/{maxSelections})</p>
+              <div className="seed-selected-list">
+                {likeMovies.map((movie) => (
+                  <button
+                    key={`liked-${movie.id}`}
+                    type="button"
+                    className="seed-chip selected"
+                    onClick={() => removeMovie(movie.id, likeMovies, setLikeMovies)}
+                    disabled={loading}
+                  >
+                    {movie.title}
+                  </button>
+                ))}
+                {likeMovies.length === 0 && <span className="seed-empty">No titles added yet</span>}
+              </div>
+            </div>
+            <div className="seed-dropzone">
+              <p className="seed-help">Add to Less of ({dislikeMovies.length}/{maxSelections})</p>
+              <div className="seed-selected-list">
+                {dislikeMovies.map((movie) => (
+                  <button
+                    key={`disliked-${movie.id}`}
+                    type="button"
+                    className="seed-chip"
+                    onClick={() => removeMovie(movie.id, dislikeMovies, setDislikeMovies)}
+                    disabled={loading}
+                  >
+                    {movie.title}
+                  </button>
+                ))}
+                {dislikeMovies.length === 0 && <span className="seed-empty">No titles added yet</span>}
+              </div>
+            </div>
           </div>
           {searchError && <p className="seed-help">{searchError}</p>}
           <div className="seed-results">
             {results.map((movie) => (
-              <button
-                key={movie.id}
-                type="button"
-                className="seed-result"
-                onClick={() => addMovie(movie)}
-                disabled={loading}
-              >
+              <div key={movie.id} className="seed-result">
                 <div className="seed-result-main">
                   <span className="seed-result-title">{movie.title}</span>
                   <span className="seed-result-meta">
@@ -199,6 +208,24 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
                     {movie.data?.directors?.length ? ` · Dir. ${movie.data.directors[0]}` : ''}
                     {movie.data?.genres?.length ? ` · ${movie.data.genres.slice(0, 2).join(', ')}` : ''}
                   </span>
+                </div>
+                <div className="seed-result-actions">
+                  <button
+                    type="button"
+                    className="seed-chip selected"
+                    onClick={() => addMovie(movie, likeMovies, setLikeMovies, dislikeMovies, setDislikeMovies)}
+                    disabled={loading || likeMovies.length >= maxSelections}
+                  >
+                    Like
+                  </button>
+                  <button
+                    type="button"
+                    className="seed-chip"
+                    onClick={() => addMovie(movie, dislikeMovies, setDislikeMovies, likeMovies, setLikeMovies)}
+                    disabled={loading || dislikeMovies.length >= maxSelections}
+                  >
+                    Less of
+                  </button>
                 </div>
                 <div className="seed-result-preview">
                   <div className="seed-preview-media">
@@ -218,50 +245,10 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
                     </div>
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
 
-          {(likeMovies.length > 0 || dislikeMovies.length > 0) && (
-            <div className="seed-selected">
-              {likeMovies.length > 0 && (
-                <div>
-                  <p className="seed-help">Liked titles</p>
-                  <div className="seed-selected-list">
-                    {likeMovies.map((movie) => (
-                      <button
-                        key={`liked-${movie.id}`}
-                        type="button"
-                        className="seed-chip selected"
-                        onClick={() => removeMovie(movie.id, likeMovies, setLikeMovies)}
-                        disabled={loading}
-                      >
-                        {movie.title}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {dislikeMovies.length > 0 && (
-                <div>
-                  <p className="seed-help">Less of</p>
-                  <div className="seed-selected-list">
-                    {dislikeMovies.map((movie) => (
-                      <button
-                        key={`disliked-${movie.id}`}
-                        type="button"
-                        className="seed-chip"
-                        onClick={() => removeMovie(movie.id, dislikeMovies, setDislikeMovies)}
-                        disabled={loading}
-                      >
-                        {movie.title}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 

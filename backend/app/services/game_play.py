@@ -201,7 +201,7 @@ class GamePlayMixin:
             raise ValueError("Not enough products left to generate a round")
 
         scored = self._rank_candidates(model, state, candidates_source, category, disliked_tokens)
-        candidate_ids = self._build_round_candidates(game_id, round_number, scored)
+        candidate_ids = self._build_round_candidates(game_id, round_number, category, scored)
         candidate_products = await self._get_products_by_ids(
             db,
             candidate_ids,
@@ -538,7 +538,7 @@ class GamePlayMixin:
             raise ValueError("Not enough products left to generate a round")
 
         scored = self._rank_candidates(model, state, candidates_source, category, disliked_tokens)
-        candidate_ids = self._build_round_candidates(game_id, round_number, scored)
+        candidate_ids = self._build_round_candidates(game_id, round_number, category, scored)
         candidate_products = await self._get_products_by_ids(
             db,
             candidate_ids,

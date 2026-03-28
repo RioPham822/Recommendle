@@ -6,7 +6,7 @@
   justify-content: center;
   min-height: 100vh;
   padding: 1rem;
-  background: linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
+  background: var(--page-bg);
 }
 
 .auth-container {
@@ -21,10 +21,7 @@
   border-radius: 18px;
   padding: 3rem 2.5rem;
   box-shadow: var(--shadow-md);
-  border: 1px solid transparent;
-  background-image: linear-gradient(var(--surface-translucent), var(--surface-translucent)), var(--brand-sequence);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
+  border: 1px solid var(--primary);
   position: relative;
   z-index: 11;
   backdrop-filter: blur(10px);
@@ -138,7 +135,7 @@
 .auth-submit-button {
   width: 100%;
   padding: 0.92rem 1.4rem;
-  background: var(--brand-sequence);
+  background: var(--primary);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -208,8 +205,8 @@
 }
 
 .auth-info {
-  background: var(--brand-sequence-soft);
-  border: 1px solid var(--border-strong);
+  background: var(--surface-alt);
+  border: 1px solid var(--accent);
   border-radius: 10px;
   padding: 1.15rem 1.2rem;
 }
@@ -286,10 +283,7 @@
 
 /* Dark mode */
 body[data-theme='dark'] .auth-screen {
-  background:
-    radial-gradient(circle at 14% 18%, rgba(222, 84, 43, 0.24), transparent 28%),
-    radial-gradient(circle at 86% 20%, rgba(58, 111, 172, 0.22), transparent 30%),
-    #000000;
+  background: var(--page-bg);
 }
 
 body[data-theme='dark'] .auth-box {
