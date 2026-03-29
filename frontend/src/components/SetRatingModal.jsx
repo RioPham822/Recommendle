@@ -22,11 +22,9 @@ export default function SetRatingModal({
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="How do you feel about your set?">
       <div className="modal-card rating-modal">
-        <p className="eyebrow">Last setup step</p>
         <h3>How do you feel about your set?</h3>
         <p className="rating-modal__copy">
-          This tells the AI how much confidence it should place in your opening 10 {plural}. A stronger score means
-          your starter set is a clearer picture of your taste.
+          This tells the AI how strongly it should trust your opening 10 {plural}.
         </p>
 
         <div className="rating-scale">

@@ -46,7 +46,7 @@ const THEME_STORAGE_KEY = 'recommendle-theme';
 const MIN_CATEGORY_ITEMS = 100;
 const CATEGORY_RETRY_MS = 2500;
 const CATEGORY_POLL_MS = 10000;
-const SPONSOR_MODE = 'beta';
+const TRAINING_MODE = 'beta';
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -93,6 +93,7 @@ export default function App() {
 
   const activeCategory = game?.category || selectedCategory;
   const activeLogo = theme === 'dark' ? logoDark : logo;
+  const showHeaderBrand = !(isAuthenticated && view === VIEW.WELCOME);
   const activeCategoryCount = categories.filter((category) => (Number(category.available_count) || 0) >= MIN_CATEGORY_ITEMS).length;
   const categoryProgress = categories.length
     ? Math.round(
@@ -281,7 +282,7 @@ export default function App() {
 
     setBusy((previous) => ({ ...previous, start: true }));
     try {
-      const created = await startGame(playerName.trim(), selectedCategory, freshStart, SPONSOR_MODE);
+      const created = await startGame(playerName.trim(), selectedCategory, freshStart, TRAINING_MODE);
       setGame(created);
       setOnboarding(null);
       setRoundData(null);
@@ -471,16 +472,20 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className={`app-shell__header ${isAuthenticated ? 'authenticated' : 'public'}`}>
-        <button
-          type="button"
-          className="brand-home"
-          onClick={() => {
-            if (isAuthenticated) resetAll();
-          }}
-          aria-label="Go home"
-        >
-          <img src={activeLogo} alt="Recommendle" className="app-logo" />
-        </button>
+        {showHeaderBrand ? (
+          <button
+            type="button"
+            className="brand-home"
+            onClick={() => {
+              if (isAuthenticated) resetAll();
+            }}
+            aria-label="Go home"
+          >
+            <img src={activeLogo} alt="Recommendle" className="app-logo" />
+          </button>
+        ) : (
+          <div className="app-shell__brand-spacer" aria-hidden="true" />
+        )}
         <div className="app-shell__actions">
           {isAuthenticated && (view === VIEW.ONBOARDING || view === VIEW.ROUND) && (
             <BrainModePanel
@@ -605,6 +610,7 @@ export default function App() {
             <RoundResultPanel
               result={roundResult}
               categoryCopy={roundResult?.category_copy || {}}
+              mode={mode}
               onNext={handleResultNext}
               loadingNext={busy.next}
             />

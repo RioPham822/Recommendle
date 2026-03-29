@@ -1,6 +1,5 @@
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import DoneRoundedIcon from '@mui/icons-material/DoneRounded';
 import { formatPrice } from '../lib/api';
 
 export default function ProductCard({
@@ -29,6 +28,8 @@ export default function ProductCard({
     .slice(0, compact ? 3 : 5);
 
   const featureTokens = [...(product.meta_badges || []), ...((product.tags || []).slice(0, compact ? 2 : 4))].slice(0, 5);
+  const showMedia = mode !== 'feature';
+  const showSelectionBadge = selectionNumber > 0 || selected;
 
   function formatAttrValue(value) {
     if (Array.isArray(value)) {
@@ -51,23 +52,21 @@ export default function ProductCard({
         className={`product-card mode-${mode}`}
         onClick={onClick}
       >
-        <span className="product-card__selection">
-          {selectionNumber > 0 ? selectionNumber : selected ? <CheckRoundedIcon fontSize="small" /> : <DoneRoundedIcon fontSize="small" />}
-        </span>
-
-        {showDismiss && (
-          <span className={`product-card__dismiss-state ${dismissed ? 'active' : ''}`}>
-            <CloseRoundedIcon fontSize="small" />
+        {showSelectionBadge && (
+          <span className="product-card__selection">
+            {selectionNumber > 0 ? selectionNumber : <CheckRoundedIcon fontSize="small" />}
           </span>
         )}
 
-        <div className="product-card__media">
-          {product.image_url ? (
-            <img src={product.image_url} alt={product.title} loading="lazy" />
-          ) : (
-            <div className="product-card__fallback">No image</div>
-          )}
-        </div>
+        {showMedia && (
+          <div className="product-card__media">
+            {product.image_url ? (
+              <img src={product.image_url} alt={product.title} loading="lazy" />
+            ) : (
+              <div className="product-card__fallback">No image</div>
+            )}
+          </div>
+        )}
 
         <div className="product-card__body">
           <h3>{product.title}</h3>
@@ -106,8 +105,8 @@ export default function ProductCard({
           type="button"
           className={`product-card__dismiss-chip ${dismissed ? 'active' : ''}`}
           onClick={onToggleDismiss}
-          title={dismissed ? 'Undo less like this' : 'Less like this'}
-          aria-label={dismissed ? `Undo less like this for ${product.title}` : `Less like this for ${product.title}`}
+          title={dismissed ? 'Undo less like this' : 'Tell the AI less like this'}
+          aria-label={dismissed ? `Undo less like this for ${product.title}` : `Tell the AI less like this for ${product.title}`}
         >
           <CloseRoundedIcon fontSize="small" />
         </button>

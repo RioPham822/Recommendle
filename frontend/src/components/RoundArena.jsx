@@ -31,8 +31,9 @@ export default function RoundArena({
         <aside className="round-layout__left">
           <PreferenceDeck
             title="Your active preferences"
-            subtitle="This deck combines your onboarding set and your picks so far. Remove anything that no longer feels right."
+            subtitle="Remove anything that no longer feels right."
             items={round.preference_deck || []}
+            mode={mode}
             emptyLabel="Your preference deck is still building."
             removable
             busyId={preferenceBusyId}
@@ -54,11 +55,6 @@ export default function RoundArena({
               </div>
             </div>
             <p>{round.round_intro_body || `Pick your favorite ${singular}. If the AI places it in its top 5, your streak grows.`}</p>
-            <div className="metric-strip">
-              <span>Rounds played {round.rounds_played}</span>
-              <span>Coherence {round.pre_round_metrics.coherence_score.toFixed(2)}</span>
-              <span>Predicted set rating {round.pre_round_metrics.predicted_prefix_rating.toFixed(2)}</span>
-            </div>
           </div>
 
           <div className="pool-grid candidates">
@@ -83,10 +79,7 @@ export default function RoundArena({
           <div className="panel round-sidebar">
             <p className="eyebrow">Current choice</p>
             <h3>{selectedProduct ? selectedProduct.title : `Choose a ${singular}`}</h3>
-            <p className="round-sidebar__copy">
-              Hover or focus any tile to see the top five signals the AI thinks you like in that item.
-            </p>
-            {selectedProduct && (
+            {selectedProduct && mode !== 'feature' && (
               <div className="round-sidebar__preview">
                 <div className="round-sidebar__preview-media">
                   {selectedProduct.image_url ? (

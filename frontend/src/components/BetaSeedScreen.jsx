@@ -85,8 +85,8 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
   const config = useMemo(() => {
     if (category === 'movies') {
       return {
-        title: 'Tell the model what kinds of movies pull you in first.',
-        description: 'These signals help the AI choose a better 100-item opening pool before you pick your 10 favorites.',
+        title: 'Give the model a better movie signal.',
+        description: 'Optional. Helps shape the opening 100.',
         sections: [
           { field: 'genres', label: 'Genres', options: ['Drama', 'Comedy', 'Action', 'Sci-Fi', 'Thriller', 'Romance', 'Horror', 'Adventure'] },
           { field: 'directors', label: 'Directors', options: ['Christopher Nolan', 'Greta Gerwig', 'Denis Villeneuve', 'Jordan Peele', 'Hayao Miyazaki', 'David Fincher'] },
@@ -95,8 +95,8 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
     }
     if (category === 'games') {
       return {
-        title: 'Prime the AI with the game styles you reach for first.',
-        description: 'Use genres, play patterns, and a few favorite titles so the first sample already feels closer to your taste.',
+        title: 'Give the model a better game signal.',
+        description: 'Optional. Helps shape the opening 100.',
         sections: [
           { field: 'genres', label: 'Genres', options: ['RPG', 'Action', 'Strategy', 'Adventure', 'Shooter', 'Simulation', 'Sports', 'Puzzle'] },
           { field: 'platforms', label: 'Platforms', options: ['PC', 'PlayStation 5', 'Nintendo Switch', 'Xbox Series X|S', 'PlayStation 4', 'Steam Deck'] },
@@ -104,8 +104,8 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
       };
     }
     return {
-      title: 'Give the AI a better opening signal for fountain pens.',
-      description: 'Share brands, styles, and a few specific pens you like or avoid so the first 100 pens feel less random.',
+      title: 'Give the model a better pen signal.',
+      description: 'Optional. Helps shape the opening 100.',
       sections: [
         { field: 'vendor', label: 'Brands', options: ['Pelikan', 'Parker', 'Pilot', 'Sailor', 'Lamy', 'TWSBI', 'Visconti', 'Kaweco'] },
         { field: 'tags', label: 'Styles & traits', options: ['Demonstrator', 'Classic', 'Vintage', 'Gold Nib', 'Piston Fill', 'Travel', 'Minimalist', 'Premium'] },
@@ -177,8 +177,8 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
       </div>
 
       <SeedSection
-        title="Quick preference signals"
-        description="These cues shape the opening pool before you choose your 10 favorites."
+        title="Quick signals"
+        description="Add a few likes and dislikes."
         sections={config.sections}
         likes={likes}
         dislikes={dislikes}
@@ -192,9 +192,9 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
         <div className="seed-search-panel__header">
           <div>
             <p className="eyebrow">Specific titles</p>
-            <h3>Search for exact items</h3>
+            <h3>Search exact items</h3>
           </div>
-          <span>Optional, but helpful</span>
+          <span>Optional</span>
         </div>
         <label className="seed-search">
           <SearchRoundedIcon fontSize="small" />
@@ -266,7 +266,7 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
       </section>
 
       <div className="round-actions round-actions--split">
-        <p className="muted">You can skip this and still play. Adding a few signals just gives the AI a smarter head start.</p>
+        <p className="muted">Skip this if you want.</p>
         <div className="round-actions__cluster">
           <button type="button" className="ghost" onClick={onSkip} disabled={loading}>
             Skip

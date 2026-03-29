@@ -123,6 +123,27 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             int(state.get("match_streak_target") or cls.DEFAULT_MATCH_STREAK_TARGET),
         )
 
+    @classmethod
+    def _reset_run_progress(cls, state: dict[str, Any] | None) -> dict[str, Any]:
+        """Preserve learned preferences while resetting per-run counters."""
+        reset = cls._ensure_redesign_state(state)
+        reset["current_match_streak"] = 0
+        reset["longest_match_streak"] = 0
+        reset["rounds_played"] = 0
+        reset["total_matches"] = 0
+        return reset
+
+    @staticmethod
+    def _has_carryable_profile(game: GameRecord | dict[str, Any] | None) -> bool:
+        """Return whether a completed session can seed a new run."""
+        if not game:
+            return False
+        state = game.model_state if isinstance(game, GameRecord) else game.get("model_state")
+        onboarding_selected_ids = (
+            game.onboarding_selected_ids if isinstance(game, GameRecord) else game.get("onboarding_selected_ids")
+        ) or []
+        return isinstance(state, dict) and len(onboarding_selected_ids) == 10
+
     @staticmethod
     def _align_state_to_feature_space(model: PrefixCFModel, state: dict[str, Any]) -> bool:
         expected_dim = len(model.feature_space.feature_index)
@@ -824,71 +845,127 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         if not clean_name:
             raise ValueError("Player name is required")
         now = datetime.utcnow()
-        existing_game = await db.scalar(
+        active_game = await db.scalar(
             select(GameRecord)
             .where(
                 and_(
                     GameRecord.player_name == clean_name,
                     GameRecord.category == normalized_category,
+                    GameRecord.status.in_(["onboarding", "ready", "playing"]),
                 )
             )
             .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
             .limit(1)
         )
-        if existing_game is not None:
-            if fresh_start:
-                await db.execute(delete(GameRoundRecord).where(GameRoundRecord.game_id == existing_game.id))
-                await db.execute(delete(PrefixRatingRecord).where(PrefixRatingRecord.session_id == existing_game.id))
-                existing_game.status = "onboarding"
-                existing_game.current_round = 0
-                existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
-                existing_game.human_score = 0
-                existing_game.ai_score = 0
-                existing_game.mode = normalized_mode
-                existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
-                existing_game.model_state = self._ensure_redesign_state(model.init_state())
-                existing_game.onboarding_pool_ids = []
-                existing_game.onboarding_selected_ids = []
-                existing_game.onboarding_rating = None
-                existing_game.updated_at = now
-                await db.commit()
-                await db.refresh(existing_game)
-                return self._game_out_payload(existing_game, resumed=False)
-
-            if existing_game.status in {"onboarding", "ready", "playing"}:
-                if int(existing_game.schema_version or self.LEGACY_SCHEMA_VERSION) < self.REDESIGN_SCHEMA_VERSION:
-                    existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
-                    existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
-                    existing_game.model_state = self._ensure_redesign_state(existing_game.model_state or model.init_state())
-                    existing_game.updated_at = now
-                    await db.commit()
-                    await db.refresh(existing_game)
-                return self._game_out_payload(existing_game, resumed=True)
-
-            can_carry_profile = bool(
-                isinstance(existing_game.model_state, dict) and len(existing_game.onboarding_selected_ids or []) == 10
+        latest_completed_game = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name == clean_name,
+                    GameRecord.category == normalized_category,
+                    GameRecord.status == "completed",
+                )
             )
-            if can_carry_profile:
-                existing_game.status = "ready"
-                existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
-                existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
-                existing_game.model_state = self._ensure_redesign_state(existing_game.model_state or model.init_state())
-            else:
-                existing_game.status = "onboarding"
-                existing_game.current_round = 0
-                existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
-                existing_game.human_score = 0
-                existing_game.ai_score = 0
-                existing_game.mode = normalized_mode
-                existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
-                existing_game.model_state = self._ensure_redesign_state(model.init_state())
-                existing_game.onboarding_pool_ids = []
-                existing_game.onboarding_selected_ids = []
-                existing_game.onboarding_rating = None
-            existing_game.updated_at = now
+            .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
+            .limit(1)
+        )
+        if active_game is not None:
+            if fresh_start:
+                await db.execute(delete(GameRoundRecord).where(GameRoundRecord.game_id == active_game.id))
+                await db.execute(delete(PrefixRatingRecord).where(PrefixRatingRecord.session_id == active_game.id))
+                active_game.status = "onboarding"
+                active_game.current_round = 0
+                active_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
+                active_game.human_score = 0
+                active_game.ai_score = 0
+                active_game.mode = normalized_mode
+                active_game.schema_version = self.REDESIGN_SCHEMA_VERSION
+                active_game.model_state = self._ensure_redesign_state(model.init_state())
+                active_game.onboarding_pool_ids = []
+                active_game.onboarding_selected_ids = []
+                active_game.onboarding_rating = None
+                active_game.updated_at = now
+                await db.commit()
+                await db.refresh(active_game)
+                return self._game_out_payload(active_game, resumed=False)
+
+            if int(active_game.schema_version or self.LEGACY_SCHEMA_VERSION) < self.REDESIGN_SCHEMA_VERSION:
+                active_game.schema_version = self.REDESIGN_SCHEMA_VERSION
+                active_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
+                active_game.model_state = self._ensure_redesign_state(active_game.model_state or model.init_state())
+                active_game.updated_at = now
+                await db.commit()
+                await db.refresh(active_game)
+            return self._game_out_payload(active_game, resumed=True)
+
+        if fresh_start:
+            game = GameRecord(
+                schema_version=self.REDESIGN_SCHEMA_VERSION,
+                player_name=clean_name,
+                category=normalized_category,
+                mode=normalized_mode,
+                status="onboarding",
+                current_round=0,
+                total_rounds=self.DEFAULT_MATCH_STREAK_TARGET,
+                human_score=0,
+                ai_score=0,
+                model_state=self._ensure_redesign_state(model.init_state()),
+                onboarding_pool_ids=[],
+                onboarding_selected_ids=[],
+                onboarding_rating=None,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(game)
             await db.commit()
-            await db.refresh(existing_game)
-            return self._game_out_payload(existing_game, resumed=True)
+            await db.refresh(game)
+            return self._game_out_payload(game, resumed=False)
+
+        if self._has_carryable_profile(latest_completed_game):
+            game = GameRecord(
+                schema_version=self.REDESIGN_SCHEMA_VERSION,
+                player_name=clean_name,
+                category=normalized_category,
+                mode=normalized_mode,
+                status="ready",
+                current_round=0,
+                total_rounds=self.DEFAULT_MATCH_STREAK_TARGET,
+                human_score=0,
+                ai_score=0,
+                model_state=self._reset_run_progress(latest_completed_game.model_state or model.init_state()),
+                onboarding_pool_ids=[],
+                onboarding_selected_ids=list(latest_completed_game.onboarding_selected_ids or []),
+                onboarding_rating=latest_completed_game.onboarding_rating,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(game)
+            await db.commit()
+            await db.refresh(game)
+            return self._game_out_payload(game, resumed=False)
+
+        if latest_completed_game is not None:
+            game = GameRecord(
+                schema_version=self.REDESIGN_SCHEMA_VERSION,
+                player_name=clean_name,
+                category=normalized_category,
+                mode=normalized_mode,
+                status="onboarding",
+                current_round=0,
+                total_rounds=self.DEFAULT_MATCH_STREAK_TARGET,
+                human_score=0,
+                ai_score=0,
+                model_state=self._ensure_redesign_state(model.init_state()),
+                onboarding_pool_ids=[],
+                onboarding_selected_ids=[],
+                onboarding_rating=None,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(game)
+            await db.commit()
+            await db.refresh(game)
+            return self._game_out_payload(game, resumed=False)
 
         game = GameRecord(
             schema_version=self.REDESIGN_SCHEMA_VERSION,

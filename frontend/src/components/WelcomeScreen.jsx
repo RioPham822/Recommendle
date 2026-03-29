@@ -38,7 +38,6 @@ export default function WelcomeScreen({
   onViewPlayer,
 }) {
   const activeCategory = categories.find((entry) => entry.id === selectedCategory);
-  const plural = activeCategory?.item_plural || 'items';
   const readyCount = categories.filter((entry) => entry.available_count >= 100).length;
   const showDatasetLoading = categoriesLoading || readyCount < categories.length;
 
@@ -47,11 +46,9 @@ export default function WelcomeScreen({
       <div className="welcome-layout">
         <div className="welcome-hero">
           <img src={logoSrc} alt="Recommendle" className="welcome-hero__logo" />
-          <p className="eyebrow">Sponsor demo flow</p>
           <h1>Can you train an AI to choose for you?</h1>
           <p className="welcome-hero__subtitle">
-            Start with a sharper preference signal, rate your opening set, and see how many rounds it takes the AI
-            to read your taste well enough to match you five times in a row.
+            Build a taste profile and see how fast the AI can match you five rounds in a row.
           </p>
 
           <div className="welcome-steps">
@@ -59,21 +56,21 @@ export default function WelcomeScreen({
               <span>1</span>
               <div>
                 <strong>Choose 10 items</strong>
-                <p>Pick from a wider pool of 100 so your opening taste profile feels real.</p>
+                <p>Pick from 100.</p>
               </div>
             </article>
             <article className="welcome-step">
               <span>2</span>
               <div>
                 <strong>How do you feel about your set?</strong>
-                <p>Rate how cohesive that starter set feels so the AI knows how strong the signal is.</p>
+                <p>Rate the signal.</p>
               </div>
             </article>
             <article className="welcome-step">
               <span>3</span>
               <div>
                 <strong>Build a streak of matches</strong>
-                <p>Your run ends only when the AI includes your pick in its top 5 for five rounds in a row.</p>
+                <p>Reach five in a row.</p>
               </div>
             </article>
           </div>
@@ -98,7 +95,7 @@ export default function WelcomeScreen({
             <div className="welcome-panel__heading">
               <div>
                 <p className="eyebrow">Choose a category</p>
-                <h2>Pick the arena</h2>
+                <h2>Pick a category</h2>
               </div>
               <span className="welcome-panel__count">
                 {activeCategory?.display_name || 'Select one'}
@@ -155,8 +152,7 @@ export default function WelcomeScreen({
             <div className="welcome-panel__resume">
               <strong>Resume ready</strong>
               <p>
-                You have a saved run in {activeCategory?.display_name || 'this category'}.
-                We will continue from round {(resumable.current_round || 0) + 1}.
+                Continue from round {(resumable.current_round || 0) + 1}.
               </p>
             </div>
           )}
@@ -172,7 +168,7 @@ export default function WelcomeScreen({
           <span>{activeCategory?.display_name || 'Category'}</span>
         </div>
         {leaderboard.length === 0 ? (
-          <p className="muted">No completed sponsor-mode runs yet for this category.</p>
+          <p className="muted">No completed runs yet for this category.</p>
         ) : (
           <table>
             <thead>

@@ -5,6 +5,7 @@ export default function PreferenceDeck({
   subtitle = '',
   items = [],
   emptyLabel = 'No preferences yet.',
+  mode = 'visual',
   removable = false,
   busyId = '',
   onRemove,
@@ -26,15 +27,17 @@ export default function PreferenceDeck({
       ) : (
         <div className="preference-deck__list">
           {items.map((item, index) => (
-            <article key={item.id} className="preference-mini-card">
+            <article key={item.id} className={`preference-mini-card ${mode === 'feature' ? 'no-media' : ''}`}>
               <span className="preference-mini-card__index">{index + 1}</span>
-              <div className="preference-mini-card__media">
-                {item.image_url ? (
-                  <img src={item.image_url} alt={item.title} loading="lazy" />
-                ) : (
-                  <div className="preference-mini-card__fallback">No image</div>
-                )}
-              </div>
+              {mode !== 'feature' && (
+                <div className="preference-mini-card__media">
+                  {item.image_url ? (
+                    <img src={item.image_url} alt={item.title} loading="lazy" />
+                  ) : (
+                    <div className="preference-mini-card__fallback">No image</div>
+                  )}
+                </div>
+              )}
               <div className="preference-mini-card__body">
                 <strong>{item.title}</strong>
                 <span>{item.subtitle || item.vendor || item.category}</span>

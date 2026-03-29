@@ -54,6 +54,41 @@ class GameServiceTests(unittest.TestCase):
         self.assertFalse(any("::" in label for label in labels))
         self.assertFalse(any(label.lower() in {"pens", "products"} for label in labels))
 
+    def test_reset_run_progress_keeps_preferences_but_clears_run_counters(self):
+        state = {
+            "user_vec": [0.9, 0.4],
+            "active_preference_ids": ["a", "b"],
+            "seed_preferences": {"likes": {"vendor": ["Pelikan"]}},
+            "current_match_streak": 4,
+            "longest_match_streak": 5,
+            "rounds_played": 11,
+            "total_matches": 7,
+        }
+
+        reset = GameService._reset_run_progress(state)
+
+        self.assertEqual(reset["user_vec"], [0.9, 0.4])
+        self.assertEqual(reset["active_preference_ids"], ["a", "b"])
+        self.assertEqual(reset["seed_preferences"], {"likes": {"vendor": ["Pelikan"]}})
+        self.assertEqual(reset["current_match_streak"], 0)
+        self.assertEqual(reset["longest_match_streak"], 0)
+        self.assertEqual(reset["rounds_played"], 0)
+        self.assertEqual(reset["total_matches"], 0)
+
+    def test_has_carryable_profile_requires_model_state_and_ten_onboarding_ids(self):
+        carryable = {
+            "model_state": {"user_vec": [0.2, 0.8]},
+            "onboarding_selected_ids": [str(index) for index in range(10)],
+        }
+        missing_picks = {
+            "model_state": {"user_vec": [0.2, 0.8]},
+            "onboarding_selected_ids": ["1", "2"],
+        }
+
+        self.assertTrue(GameService._has_carryable_profile(carryable))
+        self.assertFalse(GameService._has_carryable_profile(missing_picks))
+        self.assertFalse(GameService._has_carryable_profile({"onboarding_selected_ids": [str(index) for index in range(10)]}))
+
 
 if __name__ == "__main__":
     unittest.main()

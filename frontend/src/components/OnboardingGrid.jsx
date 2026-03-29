@@ -20,9 +20,7 @@ export default function OnboardingGrid({
         <div>
           <p className="eyebrow">Onboarding</p>
           <h2>Choose 10 {plural} from 100</h2>
-          <p className="muted">
-            Go with the options that feel most like you. The more honest this first set is, the faster the AI can lock in.
-          </p>
+          <p className="muted">Pick the 10 that feel most like you.</p>
         </div>
       </div>
 
@@ -44,11 +42,7 @@ export default function OnboardingGrid({
 
         <aside className="onboarding-rail">
           <div className="panel onboarding-progress">
-            <p className="eyebrow">What you need to do</p>
             <h3>Choose 10 items</h3>
-            <p className="onboarding-progress__copy">
-              Pick exactly 10, then tell us how strongly this set represents your taste.
-            </p>
             <div className="onboarding-progress__count">
               <strong>{selectedIds.length}</strong>
               <span>of 10 selected</span>
@@ -60,8 +54,9 @@ export default function OnboardingGrid({
 
           <PreferenceDeck
             title="Selections so far"
-            subtitle="Use the numbered badges on each tile to see the order you chose them."
+            subtitle="Remove any item here at any time."
             items={selectedProducts}
+            mode={mode}
             emptyLabel="Your chosen items will appear here as you build the opening set."
             removable
             onRemove={onToggle}

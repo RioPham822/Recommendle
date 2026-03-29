@@ -3,18 +3,34 @@ import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import { getGameSummary } from '../lib/api';
 
 function MiniBarChart({ data, label, className = '' }) {
+  if (!data.length) {
+    return (
+      <div className={`panel mini-chart ${className}`}>
+        <div className="mini-chart__header">
+          <h4>{label}</h4>
+        </div>
+        <p className="muted">No data yet.</p>
+      </div>
+    );
+  }
+
   const max = Math.max(...data.map((item) => item.value), 1);
 
   return (
-    <div className={`mini-chart ${className}`}>
-      <h4>{label}</h4>
+    <div className={`panel mini-chart ${className}`}>
+      <div className="mini-chart__header">
+        <h4>{label}</h4>
+      </div>
       <div className="chart-bars">
         {data.map((item) => (
           <div key={item.label} className="chart-bar-col">
-            <div
-              className={`chart-bar ${item.highlight ? 'highlight' : ''}`}
-              style={{ height: `${(item.value / max) * 100}%` }}
-            />
+            <div className="chart-bar-track">
+              <div
+                className={`chart-bar ${item.highlight ? 'highlight' : ''}`}
+                style={{ height: `${item.value > 0 ? Math.max((item.value / max) * 100, 10) : 8}%` }}
+              />
+            </div>
+            <span className="chart-bar-value">{item.value}</span>
             <span className="chart-bar-label">{item.label}</span>
           </div>
         ))}
@@ -172,7 +188,7 @@ export default function FinalSummary({
           <span>{copy.display_name || category}</span>
         </div>
         {leaderboard.length === 0 ? (
-          <p className="muted">No completed sponsor-mode runs yet.</p>
+          <p className="muted">No completed runs yet.</p>
         ) : (
           <table>
             <thead>
