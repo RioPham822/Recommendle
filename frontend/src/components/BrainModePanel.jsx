@@ -1,32 +1,33 @@
-import React from 'react';
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined';
+import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 
 export default function BrainModePanel({ mode, onModeChange, categoryCopy = {} }) {
   const caption = categoryCopy.mode_caption
-    || 'Visual mode prioritizes product imagery. Feature mode emphasizes vendor, price, and tag signals.';
+    || 'Pictures highlights visuals. Specifications highlights the strongest attribute signals the AI is using.';
 
   return (
     <div className="brain-mode-panel">
-      <div className="mode-buttons" role="tablist" aria-label="Explore mode">
+      <div className="brain-mode-panel__switch" role="tablist" aria-label="Display mode">
         <button
           type="button"
-          role="tab"
-          className={mode === 'visual' ? 'active' : ''}
+          className={`icon-button brain-mode-panel__button ${mode === 'visual' ? 'active' : ''}`}
           onClick={() => onModeChange('visual')}
+          aria-label="Pictures mode"
+          title="Pictures"
         >
-          Visual Mode
+          <ImageOutlinedIcon fontSize="small" />
         </button>
         <button
           type="button"
-          role="tab"
-          className={mode === 'feature' ? 'active' : ''}
+          className={`icon-button brain-mode-panel__button ${mode === 'feature' ? 'active' : ''}`}
           onClick={() => onModeChange('feature')}
+          aria-label="Specifications mode"
+          title="Specifications"
         >
-          Feature Mode
+          <TuneRoundedIcon fontSize="small" />
         </button>
       </div>
-      <p className="mode-caption">
-        {caption}
-      </p>
+      <p className="brain-mode-panel__caption">{caption}</p>
     </div>
   );
 }

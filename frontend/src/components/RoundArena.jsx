@@ -1,13 +1,12 @@
-import React from 'react';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
+import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
+import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
+import PreferenceDeck from './PreferenceDeck';
 import ProductCard from './ProductCard';
 
 export default function RoundArena({
   round,
-  totalRounds,
-  humanScore,
-  aiScore,
   mode,
-  categoryCopy = {},
   selectedPick,
   onSelectPick,
   onSubmitPick,
@@ -15,72 +14,126 @@ export default function RoundArena({
   onToggleLessLike,
   onRefresh,
   refreshing = false,
-  onHome,
   submitting,
+  onRemovePreference,
+  preferenceBusyId = '',
 }) {
-  if (!round) {
-    return null;
-  }
+  if (!round) return null;
 
-  const singular = categoryCopy.item_singular || 'item';
+  const selectedProduct = round.candidates.find((candidate) => candidate.id === selectedPick) || null;
+  const singular = round.category_copy?.item_singular || 'item';
+  const currentMatchStreak = round.current_match_streak || 0;
+  const matchTarget = round.match_streak_target || 5;
 
   return (
-    <section className="screen shell">
-      <header className="section-header">
-        <div>
-          <p className="eyebrow">Gameplay</p>
-          <h2>Round {round.round_number} of {totalRounds}</h2>
-        </div>
-        <div className="scoreline">
-          <span>You: {humanScore}</span>
-          <span>AI: {aiScore}</span>
-        </div>
-      </header>
-
-      <div className="metric-strip">
-        <span>Coherence {round.pre_round_metrics.coherence_score.toFixed(2)}</span>
-        <span>Predicted Set Rating {round.pre_round_metrics.predicted_prefix_rating.toFixed(2)}</span>
-      </div>
-
-      <div className="pool-grid candidates">
-        {round.candidates.map((product) => (
-          <ProductCard
-            key={product.id}
-            product={product}
-            mode={mode}
-            selected={selectedPick === product.id}
-            onClick={() => onSelectPick(product.id)}
-            compact
-            showDismiss
-            dismissed={lessLikeIds.includes(product.id)}
-            onToggleDismiss={() => onToggleLessLike && onToggleLessLike(product.id)}
+    <section className="screen shell round-screen">
+      <div className="round-layout">
+        <aside className="round-layout__left">
+          <PreferenceDeck
+            title="Your active preferences"
+            subtitle="This deck combines your onboarding set and your picks so far. Remove anything that no longer feels right."
+            items={round.preference_deck || []}
+            emptyLabel="Your preference deck is still building."
+            removable
+            busyId={preferenceBusyId}
+            onRemove={onRemovePreference}
+            accent="cool"
           />
-        ))}
-      </div>
+        </aside>
 
-      <div className="round-actions">
-        <button
-          type="button"
-          className="ghost"
-          onClick={onHome}
-        >
-          Home
-        </button>
-        <button
-          type="button"
-          className="secondary-btn"
-          onClick={onRefresh}
-          disabled={refreshing || submitting}
-        >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
-        <button
-          type="button"
-          onClick={onSubmitPick}
-          disabled={submitting || !selectedPick}
-        >
-          {submitting ? 'Submitting pick...' : `Lock In ${singular}`}
-        </button>
+        <div className="round-layout__main">
+          <div className="panel round-intro">
+            <div className="round-intro__header">
+              <div>
+                <p className="eyebrow">Round {round.round_number}</p>
+                <h2>{round.round_intro_title || 'Now the AI starts reading your taste.'}</h2>
+              </div>
+              <div className="streak-pill">
+                <TrendingUpRoundedIcon fontSize="small" />
+                <span>{currentMatchStreak} / {matchTarget} match streak</span>
+              </div>
+            </div>
+            <p>{round.round_intro_body || `Pick your favorite ${singular}. If the AI places it in its top 5, your streak grows.`}</p>
+            <div className="metric-strip">
+              <span>Rounds played {round.rounds_played}</span>
+              <span>Coherence {round.pre_round_metrics.coherence_score.toFixed(2)}</span>
+              <span>Predicted set rating {round.pre_round_metrics.predicted_prefix_rating.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="pool-grid candidates">
+            {round.candidates.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                mode={mode}
+                compact
+                selected={selectedPick === product.id}
+                showDismiss
+                dismissed={lessLikeIds.includes(product.id)}
+                onToggleDismiss={() => onToggleLessLike && onToggleLessLike(product.id)}
+                onClick={() => onSelectPick(product.id)}
+                showPredictionHints
+              />
+            ))}
+          </div>
+        </div>
+
+        <aside className="round-layout__right">
+          <div className="panel round-sidebar">
+            <p className="eyebrow">Current choice</p>
+            <h3>{selectedProduct ? selectedProduct.title : `Choose a ${singular}`}</h3>
+            <p className="round-sidebar__copy">
+              Hover or focus any tile to see the top five signals the AI thinks you like in that item.
+            </p>
+            {selectedProduct && (
+              <div className="round-sidebar__preview">
+                <div className="round-sidebar__preview-media">
+                  {selectedProduct.image_url ? (
+                    <img src={selectedProduct.image_url} alt={selectedProduct.title} loading="lazy" />
+                  ) : (
+                    <div className="round-sidebar__preview-fallback">No image</div>
+                  )}
+                </div>
+                <div>
+                  <strong>{selectedProduct.title}</strong>
+                  <p>{selectedProduct.subtitle || selectedProduct.vendor || 'Unknown'}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="round-sidebar__status">
+              <div>
+                <span className="round-sidebar__label">Active streak</span>
+                <strong>{currentMatchStreak}</strong>
+              </div>
+              <div>
+                <span className="round-sidebar__label">Need to win</span>
+                <strong>{matchTarget - currentMatchStreak}</strong>
+              </div>
+            </div>
+
+            <div className="round-sidebar__actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={onRefresh}
+                disabled={refreshing || submitting}
+              >
+                <RefreshRoundedIcon fontSize="small" />
+                {refreshing ? 'Refreshing...' : 'New 10'}
+              </button>
+              <button
+                type="button"
+                onClick={onSubmitPick}
+                disabled={submitting || !selectedPick}
+              >
+                <AutoAwesomeRoundedIcon fontSize="small" />
+                {submitting ? 'Locking in...' : `Lock in ${singular}`}
+              </button>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
   );

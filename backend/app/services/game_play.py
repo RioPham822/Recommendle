@@ -49,7 +49,7 @@ class GamePlayMixin:
             mode = str(game.get("mode") or "classic").lower()
             if mode == "beta":
                 model = await self._ensure_model(db)
-                state = game.get("model_state") or model.init_state()
+                state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
                 self._align_state_to_feature_space(model, state)
                 has_seed = bool(state.get("seeded"))
                 has_signal = any(abs(v) > 0.01 for v in state.get("user_vec", []))
@@ -78,6 +78,7 @@ class GamePlayMixin:
             "category": category,
             "category_copy": category_copy(category),
             "display_schema": category_display_schema(category),
+            "preference_deck": await self._preference_deck(db, game),
             "pool_size": len(products),
             "products": [self._product_card(p, category) for p in products],
         }
@@ -115,11 +116,12 @@ class GamePlayMixin:
         if len(selected_products) != 10:
             raise ValueError("One or more selected products were not found")
 
-        state = game.get("model_state") or model.init_state()
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
         self._align_state_to_feature_space(model, state)
         for product in selected_products:
             model.update_with_selection(state, product, is_exception=False)
         model.update_with_prefix_rating(state, rating)
+        state["active_preference_ids"] = list(selected_product_ids)
         metrics = await self._metrics_for_state(db, model, state, selected_product_ids, category)
 
         db.add(
@@ -132,6 +134,7 @@ class GamePlayMixin:
         )
         game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
         if game_row:
+            game_row.schema_version = self.REDESIGN_SCHEMA_VERSION
             game_row.status = "ready"
             game_row.category = category
             game_row.model_state = state
@@ -152,14 +155,19 @@ class GamePlayMixin:
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
+        profile = get_category_profile(category)
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
+        self._align_state_to_feature_space(model, state)
+        current_match_streak = int(state.get("current_match_streak") or 0)
+        longest_match_streak = int(state.get("longest_match_streak") or 0)
+        match_streak_target = int(state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET)
 
         if len(game.get("onboarding_selected_ids", [])) != 10:
             raise ValueError("Onboarding is incomplete")
-        if game["current_round"] >= game["total_rounds"]:
+        if current_match_streak >= match_streak_target or game.get("status") == "completed":
             raise ValueError("Game is complete")
 
         round_number = game["current_round"] + 1
-        round_target = self._round_candidate_target(category)
         existing = await db.scalar(
             select(GameRoundRecord).where(
                 and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.round_number == round_number)
@@ -171,26 +179,30 @@ class GamePlayMixin:
                 existing.candidate_ids or [],
                 projection=self._card_projection(category),
             )
+            candidate_cards = []
+            for product in products:
+                card = self._product_card(product, category)
+                card["predicted_match_features"] = self._predicted_match_features(state, product)
+                candidate_cards.append(card)
             return {
                 "round_number": round_number,
                 "category": category,
-                "round_mode": get_category_profile(category).round_mode,
+                "round_mode": profile.round_mode,
                 "category_copy": category_copy(category),
                 "display_schema": category_display_schema(category),
-                "candidates": [self._product_card(p, category) for p in products],
+                "preference_deck": await self._preference_deck(db, game),
+                "current_match_streak": current_match_streak,
+                "longest_match_streak": longest_match_streak,
+                "match_streak_target": match_streak_target,
+                "rounds_played": int(state.get("rounds_played") or game.get("current_round") or 0),
+                "round_intro_title": profile.round_intro_title,
+                "round_intro_body": profile.round_intro_body,
+                "candidates": candidate_cards,
                 "pre_round_metrics": existing.pre_metrics or {"coherence_score": 0.0, "predicted_prefix_rating": 3.0},
             }
 
-        state = game.get("model_state") or model.init_state()
-        if self._align_state_to_feature_space(model, state):
-            game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
-            if game_row:
-                game_row.model_state = state
-                game_row.updated_at = datetime.utcnow()
-                await db.commit()
-
         selected_ids = await self._current_selection_sequence(db, game)
-        used = set(selected_ids)
+        used = set(await self._historical_selection_sequence(db, game))
         disliked_ids = set(state.get("disliked_ids") or [])
         disliked_tokens = set(state.get("disliked_tokens") or [])
         all_products = await self._all_products_for_scoring(db, category)
@@ -212,7 +224,7 @@ class GamePlayMixin:
         if existing is None:
             db.add(
                 GameRoundRecord(
-                    schema_version=2,
+                    schema_version=self.REDESIGN_SCHEMA_VERSION if self._is_redesigned_game(game) else 2,
                     category=category,
                     game_id=str(game["_id"]),
                     round_number=round_number,
@@ -230,16 +242,30 @@ class GamePlayMixin:
         game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
         if game_row:
             game_row.status = "playing"
+            game_row.model_state = state
             game_row.updated_at = datetime.utcnow()
         await db.commit()
+
+        candidate_cards = []
+        for product in candidate_products:
+            card = self._product_card(product, category)
+            card["predicted_match_features"] = self._predicted_match_features(state, product)
+            candidate_cards.append(card)
 
         return {
             "round_number": round_number,
             "category": category,
-            "round_mode": get_category_profile(category).round_mode,
+            "round_mode": profile.round_mode,
             "category_copy": category_copy(category),
             "display_schema": category_display_schema(category),
-            "candidates": [self._product_card(p, category) for p in candidate_products],
+            "preference_deck": await self._preference_deck(db, game),
+            "current_match_streak": current_match_streak,
+            "longest_match_streak": longest_match_streak,
+            "match_streak_target": match_streak_target,
+            "rounds_played": int(state.get("rounds_played") or game.get("current_round") or 0),
+            "round_intro_title": profile.round_intro_title,
+            "round_intro_body": profile.round_intro_body,
+            "candidates": candidate_cards,
             "pre_round_metrics": pre_metrics,
         }
 
@@ -256,9 +282,11 @@ class GamePlayMixin:
         model = await self._ensure_model(db)
         category = self._game_category(game)
         profile = get_category_profile(category)
-        duel_mode = profile.round_mode == "duel"
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
+        self._align_state_to_feature_space(model, state)
+        match_streak_target = int(state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET)
 
-        if game["current_round"] >= game["total_rounds"]:
+        if int(state.get("current_match_streak") or 0) >= match_streak_target or game.get("status") == "completed":
             raise ValueError("Game is already complete")
         if round_number != game["current_round"] + 1:
             raise ValueError("Invalid round number for current game state")
@@ -286,8 +314,6 @@ class GamePlayMixin:
         if product_id not in by_id:
             raise ValueError("Selected product does not exist")
 
-        state = game.get("model_state") or model.init_state()
-        self._align_state_to_feature_space(model, state)
         less_like_ids = [pid for pid in (less_like_ids or []) if pid != product_id]
         if less_like_ids:
             products = await self._get_products_by_ids(
@@ -334,25 +360,41 @@ class GamePlayMixin:
         ai_score, ai_pick_product = scored[0]
         ai_pick_id = str(ai_pick_product["_id"])
         ai_top3_ids = [str(p["_id"]) for _, p in scored[:3]]
+        ai_top5_ids = [str(p["_id"]) for _, p in scored[:5]]
         ai_exact = ai_pick_id == product_id
-        ai_correct = ai_exact if duel_mode else (product_id in ai_top3_ids)
-        human_points = 0 if ai_correct else 10
-        ai_points = 10 if ai_correct else 0
+        preference_match = product_id in ai_top5_ids
+        ai_correct = preference_match
+        human_points = 1 if preference_match else 0
+        ai_points = 0 if preference_match else 1
         ai_rank_of_pick = next((i + 1 for i, (_, p) in enumerate(scored) if str(p["_id"]) == product_id), len(scored))
 
         human_pick_product = by_id[product_id]
+        current_match_features = self._predicted_match_features(state, human_pick_product)
         model.update_with_selection(state, human_pick_product, is_exception=False)
+        active_preference_ids = [str(pid) for pid in state.get("active_preference_ids") or [] if pid]
+        active_preference_ids.append(product_id)
+        state["active_preference_ids"] = list(dict.fromkeys(active_preference_ids))
+        rounds_played = int(state.get("rounds_played") or 0) + 1
+        total_matches = int(state.get("total_matches") or 0) + (1 if preference_match else 0)
+        current_match_streak = (int(state.get("current_match_streak") or 0) + 1) if preference_match else 0
+        longest_match_streak = max(int(state.get("longest_match_streak") or 0), current_match_streak)
+        state["rounds_played"] = rounds_played
+        state["total_matches"] = total_matches
+        state["current_match_streak"] = current_match_streak
+        state["longest_match_streak"] = longest_match_streak
+        game_with_state = {**game, "model_state": state}
         game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
         if game_row:
             game_row.model_state = state
 
-        selected_ids = await self._current_selection_sequence(db, game, include_product_id=product_id)
+        selected_ids = await self._current_selection_sequence(db, game_with_state, include_product_id=product_id)
         post_metrics = await self._metrics_for_state(db, model, state, selected_ids, category)
 
         top_candidates = []
         for score, product in scored[:5]:
             card = self._product_card(product, category)
             card["score"] = float(score)
+            card["predicted_match_features"] = self._predicted_match_features(state, product)
             top_candidates.append(card)
 
         human_vec = self.recommender.feature_space.vectorize(human_pick_product)
@@ -378,7 +420,7 @@ class GamePlayMixin:
         shared_raw = list(set(human_features) & set(ai_features))
         shared_features = [h for h in (humanize_feature(f) for f in shared_raw) if h is not None]
 
-        all_selected_ids = await self._current_selection_sequence(db, game, include_product_id=product_id)
+        all_selected_ids = await self._current_selection_sequence(db, game_with_state, include_product_id=product_id)
         all_selected_products = await self._get_products_by_ids(
             db,
             all_selected_ids,
@@ -397,30 +439,23 @@ class GamePlayMixin:
 
         if ai_correct:
             if ai_exact:
-                if duel_mode:
-                    reason = (
-                        f"The AI won this duel and matched your exact {profile.item_singular} choice. "
-                        f"It predicted your side correctly from the two options shown."
-                    )
-                else:
-                    reason = (
-                        f"The AI predicted your exact {profile.item_singular}! "
-                        f"It ranked this title #1 out of {len(candidate_products)} candidates based on your preference profile."
-                    )
+                reason = (
+                    f"Preference Match! The AI placed your exact {profile.item_singular} choice at #1 "
+                    f"out of {len(candidate_products)} candidates."
+                )
             else:
-                match_rank = ai_top3_ids.index(product_id) + 1
+                match_rank = ai_top5_ids.index(product_id) + 1
                 reason = (
                     f"Your pick was the AI's #{match_rank} prediction. "
-                    f"The AI successfully identified your choice within its top 3 candidates."
+                    f"The AI successfully identified your choice within its top 5 candidates."
                 )
         else:
             reason = (
-                f"Your pick ranked #{ai_rank_of_pick} in the AI's predictions. "
-                f"The model's top pick was '{ai_pick_product.get('title', 'Unknown')}', "
-                f"which scored {ai_score:.2f} based on feature similarity to your profile."
+                f"Not a match yet. Your pick ranked #{ai_rank_of_pick} in the AI's predictions. "
+                f"The model's top guess was '{ai_pick_product.get('title', 'Unknown')}'."
             )
 
-        round_row.schema_version = 2
+        round_row.schema_version = self.REDESIGN_SCHEMA_VERSION if self._is_redesigned_game(game) else 2
         round_row.human_pick_id = product_id
         round_row.ai_pick_id = ai_pick_id
         round_row.ai_confidence = float(ai_score)
@@ -434,10 +469,10 @@ class GamePlayMixin:
         round_row.completed = True
         round_row.completed_at = datetime.utcnow()
 
-        new_current_round = game["current_round"] + 1
-        new_human_total = game["human_score"] + human_points
-        new_ai_total = game["ai_score"] + ai_points
-        game_complete = new_current_round >= game["total_rounds"]
+        new_current_round = rounds_played
+        new_human_total = total_matches
+        new_ai_total = max(0, rounds_played - total_matches)
+        game_complete = current_match_streak >= match_streak_target
 
         if game_row:
             game_row.current_round = new_current_round
@@ -453,12 +488,19 @@ class GamePlayMixin:
             "category": category,
             "round_mode": profile.round_mode,
             "category_copy": category_copy(category),
+            "preference_deck": await self._preference_deck(db, game_with_state),
             "human_pick": self._product_card(human_pick_product, category),
             "ai_pick": {**self._product_card(ai_pick_product, category), "score": float(ai_score)},
             "ai_correct": ai_correct,
             "ai_exact": ai_exact,
             "ai_rank_of_pick": ai_rank_of_pick,
             "ai_top3_ids": ai_top3_ids,
+            "ai_top5_ids": ai_top5_ids,
+            "preference_match": preference_match,
+            "current_match_streak": current_match_streak,
+            "longest_match_streak": longest_match_streak,
+            "match_streak_target": match_streak_target,
+            "rounds_played": rounds_played,
             "human_points": human_points,
             "ai_points": ai_points,
             "total_human_score": new_human_total,
@@ -471,6 +513,7 @@ class GamePlayMixin:
                 "shared_features": shared_features[:6],
                 "hidden_preferences": hidden_prefs,
                 "hidden_preference_hints": hidden_hints,
+                "current_match_features": current_match_features,
             },
             "post_round_metrics": post_metrics,
             "game_complete": game_complete,
@@ -487,10 +530,16 @@ class GamePlayMixin:
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
+        profile = get_category_profile(category)
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
+        self._align_state_to_feature_space(model, state)
+        current_match_streak = int(state.get("current_match_streak") or 0)
+        longest_match_streak = int(state.get("longest_match_streak") or 0)
+        match_streak_target = int(state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET)
 
         if len(game.get("onboarding_selected_ids", [])) != 10:
             raise ValueError("Onboarding is incomplete")
-        if game["current_round"] >= game["total_rounds"]:
+        if current_match_streak >= match_streak_target or game.get("status") == "completed":
             raise ValueError("Game is complete")
 
         round_number = game["current_round"] + 1
@@ -501,9 +550,6 @@ class GamePlayMixin:
         )
         if round_row is None or round_row.completed:
             raise ValueError("Round is not active")
-
-        state = game.get("model_state") or model.init_state()
-        self._align_state_to_feature_space(model, state)
 
         less_like_ids = list(dict.fromkeys(less_like_ids or []))
         if less_like_ids:
@@ -524,7 +570,7 @@ class GamePlayMixin:
             state["disliked_tokens"] = list(disliked_tokens)
 
         selected_ids = await self._current_selection_sequence(db, game)
-        used = set(selected_ids)
+        used = set(await self._historical_selection_sequence(db, game))
         previous_candidates = set(round_row.candidate_ids or [])
         disliked_ids = set(state.get("disliked_ids") or [])
         disliked_tokens = set(state.get("disliked_tokens") or [])
@@ -557,10 +603,25 @@ class GamePlayMixin:
             game_row.updated_at = datetime.utcnow()
         await db.commit()
 
+        candidate_cards = []
+        for product in candidate_products:
+            card = self._product_card(product, category)
+            card["predicted_match_features"] = self._predicted_match_features(state, product)
+            candidate_cards.append(card)
+
         return {
             "round_number": round_number,
             "category": category,
+            "round_mode": profile.round_mode,
             "category_copy": category_copy(category),
-            "candidates": [self._product_card(p, category) for p in candidate_products],
+            "display_schema": category_display_schema(category),
+            "preference_deck": await self._preference_deck(db, game),
+            "current_match_streak": current_match_streak,
+            "longest_match_streak": longest_match_streak,
+            "match_streak_target": match_streak_target,
+            "rounds_played": int(state.get("rounds_played") or game.get("current_round") or 0),
+            "round_intro_title": profile.round_intro_title,
+            "round_intro_body": profile.round_intro_body,
+            "candidates": candidate_cards,
             "pre_round_metrics": pre_metrics,
         }

@@ -12,10 +12,13 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
+    category_display_schema,
     category_copy,
     clean_display_tags,
     get_category_profile,
     normalize_category,
+    numeric_preference_label,
+    humanize_feature as profile_humanize_feature,
     supported_categories,
     extract_feature_tokens,
 )
@@ -34,6 +37,10 @@ from .game_play import GamePlayMixin
 
 class GameService(GamePlayMixin, GameInsightsMixin):
     """Primary game service combining gameplay and insights mixins."""
+
+    REDESIGN_SCHEMA_VERSION = 3
+    LEGACY_SCHEMA_VERSION = 2
+    DEFAULT_MATCH_STREAK_TARGET = 5
 
     def __init__(self):
         """Initialize shared recommender and in-memory scoring cache."""
@@ -72,6 +79,49 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         if normalized in {"classic", "beta"}:
             return normalized
         raise ValueError(f"Unsupported game mode '{mode}'")
+
+    @classmethod
+    def _is_redesigned_game(cls, game: dict[str, Any] | None) -> bool:
+        if not game:
+            return False
+        return int(game.get("schema_version") or cls.LEGACY_SCHEMA_VERSION) >= cls.REDESIGN_SCHEMA_VERSION
+
+    @classmethod
+    def _empty_seed_preferences(cls) -> dict[str, Any]:
+        return {
+            "likes": {},
+            "dislikes": {},
+            "like_product_ids": [],
+            "dislike_product_ids": [],
+        }
+
+    @classmethod
+    def _ensure_redesign_state(cls, state: dict[str, Any] | None) -> dict[str, Any]:
+        normalized = dict(state or {})
+        normalized.setdefault("match_streak_target", cls.DEFAULT_MATCH_STREAK_TARGET)
+        normalized.setdefault("current_match_streak", 0)
+        normalized.setdefault("longest_match_streak", 0)
+        normalized.setdefault("rounds_played", 0)
+        normalized.setdefault("total_matches", 0)
+        normalized.setdefault("active_preference_ids", [])
+        normalized.setdefault("seed_preferences", cls._empty_seed_preferences())
+        return normalized
+
+    @classmethod
+    def _rounds_played(cls, game: dict[str, Any]) -> int:
+        state = cls._ensure_redesign_state(game.get("model_state") or {})
+        if cls._is_redesigned_game(game):
+            return int(state.get("rounds_played") or game.get("current_round") or 0)
+        return int(game.get("current_round") or 0)
+
+    @classmethod
+    def _match_progress(cls, game: dict[str, Any]) -> tuple[int, int, int]:
+        state = cls._ensure_redesign_state(game.get("model_state") or {})
+        return (
+            int(state.get("current_match_streak") or 0),
+            int(state.get("longest_match_streak") or 0),
+            int(state.get("match_streak_target") or cls.DEFAULT_MATCH_STREAK_TARGET),
+        )
 
     @staticmethod
     def _align_state_to_feature_space(model: PrefixCFModel, state: dict[str, Any]) -> bool:
@@ -232,6 +282,36 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         )
         return [row.human_pick_id for row in rows if row.human_pick_id]
 
+    async def _historical_selection_sequence(
+        self,
+        db: AsyncSession,
+        game: dict[str, Any],
+        include_product_id: str | None = None,
+    ) -> list[str]:
+        """Return all onboarding and round picks in encounter order."""
+        picked = await self._completed_pick_ids(db, str(game["_id"]))
+        sequence = list(game.get("onboarding_selected_ids", [])) + picked
+        if include_product_id:
+            sequence.append(include_product_id)
+        return sequence
+
+    async def _active_preference_sequence(
+        self,
+        db: AsyncSession,
+        game: dict[str, Any],
+        include_product_id: str | None = None,
+    ) -> list[str]:
+        """Return the current preference deck, falling back to historical picks."""
+        state = self._ensure_redesign_state(game.get("model_state") or {})
+        active = [str(pid) for pid in state.get("active_preference_ids") or [] if pid]
+        if active:
+            sequence = list(dict.fromkeys(active))
+        else:
+            sequence = await self._historical_selection_sequence(db, game)
+        if include_product_id:
+            sequence.append(include_product_id)
+        return list(dict.fromkeys(sequence))
+
     async def _current_selection_sequence(
         self,
         db: AsyncSession,
@@ -239,11 +319,156 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         include_product_id: str | None = None,
     ) -> list[str]:
         """Return onboarding + completed picks, optionally including a pending pick."""
-        picked = await self._completed_pick_ids(db, str(game["_id"]))
-        sequence = list(game.get("onboarding_selected_ids", [])) + picked
-        if include_product_id:
-            sequence.append(include_product_id)
-        return sequence
+        if self._is_redesigned_game(game):
+            return await self._active_preference_sequence(db, game, include_product_id=include_product_id)
+        return await self._historical_selection_sequence(db, game, include_product_id=include_product_id)
+
+    def _top_preference_features(
+        self,
+        state: dict[str, Any],
+        *,
+        limit: int = 10,
+    ) -> list[tuple[int, str, float]]:
+        """Return the strongest positive learned preferences from the current state."""
+        user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
+        inv_index = {v: k for k, v in self.recommender.feature_space.feature_index.items()}
+        weighted: list[tuple[int, str, float]] = []
+        for idx in range(len(user_vec)):
+            weight = float(user_vec[idx])
+            if weight <= 0.05:
+                continue
+            raw = inv_index.get(idx, f"feature_{idx}")
+            weighted.append((idx, raw, weight))
+        weighted.sort(key=lambda item: item[2], reverse=True)
+        return weighted[:limit]
+
+    def _predicted_match_features(
+        self,
+        state: dict[str, Any],
+        product: dict[str, Any],
+        *,
+        limit: int = 5,
+    ) -> list[str]:
+        """Return the strongest preference clues this product matches."""
+        item_vec = self.recommender.feature_space.vectorize(product)
+        feature_pairs = self._top_preference_features(state, limit=max(limit * 2, 8))
+        labels: list[str] = []
+        seen: set[str] = set()
+        for idx, raw, weight in feature_pairs:
+            if idx >= len(item_vec) or item_vec[idx] == 0:
+                continue
+            if "::num::" in raw:
+                label = numeric_preference_label(raw, weight)
+            else:
+                normalized_raw = raw.lower() if "::" in raw else raw
+                humanized = profile_humanize_feature(normalized_raw)
+                label = humanized or raw.replace("_", " ").title()
+            if not label or "::" in label:
+                continue
+            if label.lower() in {"pens", "products", "fountain pens", "fountain pens type"}:
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            labels.append(label)
+            if len(labels) >= limit:
+                break
+        return labels
+
+    async def _preference_deck(self, db: AsyncSession, game: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return visual cards for the current active preference deck."""
+        category = self._game_category(game)
+        preference_ids = await self._active_preference_sequence(db, game)
+        products = await self._get_products_by_ids(
+            db,
+            preference_ids,
+            projection=self._card_projection(category),
+        )
+        return [self._product_card(product, category) for product in products]
+
+    def _game_out_payload(self, game: GameRecord | dict[str, Any], *, resumed: bool = False) -> dict[str, Any]:
+        """Build a consistent game creation/resume payload."""
+        record = record_to_dict(game) if isinstance(game, GameRecord) else dict(game)
+        current_match_streak, longest_match_streak, match_streak_target = self._match_progress(record)
+        return {
+            "id": str(record["_id"]),
+            "schema_version": int(record.get("schema_version") or self.LEGACY_SCHEMA_VERSION),
+            "player_name": record["player_name"],
+            "category": self._game_category(record),
+            "mode": record.get("mode") or "classic",
+            "status": record["status"],
+            "total_rounds": int(record.get("total_rounds") or self.DEFAULT_MATCH_STREAK_TARGET),
+            "human_score": int(record.get("human_score") or 0),
+            "ai_score": int(record.get("ai_score") or 0),
+            "current_match_streak": current_match_streak,
+            "longest_match_streak": longest_match_streak,
+            "match_streak_target": match_streak_target,
+            "rounds_played": self._rounds_played(record),
+            "created_at": record["created_at"],
+            "resumed": resumed,
+        }
+
+    async def _apply_seed_preferences_to_state(
+        self,
+        db: AsyncSession,
+        model: PrefixCFModel,
+        state: dict[str, Any],
+        *,
+        category: str,
+        likes: dict[str, list[str]] | None = None,
+        dislikes: dict[str, list[str]] | None = None,
+        like_product_ids: list[str] | None = None,
+        dislike_product_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Apply persisted seed preferences onto a mutable model state."""
+        likes = likes or {}
+        dislikes = dislikes or {}
+        like_product_ids = like_product_ids or []
+        dislike_product_ids = dislike_product_ids or []
+
+        def build_seed_product(source: dict[str, list[str]]) -> dict[str, Any]:
+            payload: dict[str, Any] = {"category": category}
+            for key, values in source.items():
+                if values:
+                    payload[key] = values
+            return payload
+
+        if likes:
+            product = build_seed_product(likes)
+            model.update_with_seed(state, product, weight=0.45)
+
+        if dislikes:
+            product = build_seed_product(dislikes)
+            model.update_with_negative_feedback(state, product, weight=0.45)
+            tokens, _ = extract_feature_tokens(product, category)
+            disliked_tokens = set(state.get("disliked_tokens") or [])
+            disliked_tokens.update(tokens)
+            state["disliked_tokens"] = list(disliked_tokens)
+
+        if like_product_ids:
+            products = await self._get_products_by_ids(
+                db,
+                like_product_ids,
+                projection=self._feature_projection(category),
+            )
+            for product in products:
+                model.update_with_seed(state, product, weight=0.6)
+
+        if dislike_product_ids:
+            products = await self._get_products_by_ids(
+                db,
+                dislike_product_ids,
+                projection=self._feature_projection(category),
+            )
+            disliked_tokens = set(state.get("disliked_tokens") or [])
+            for product in products:
+                model.update_with_negative_feedback(state, product, weight=0.6)
+                tokens, _ = extract_feature_tokens(product, category)
+                disliked_tokens.update(tokens)
+            state["disliked_tokens"] = list(disliked_tokens)
+
+        return state
 
     async def _metrics_for_state(
         self,
@@ -302,8 +527,9 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         game_id: str,
         category: str,
     ) -> list[str]:
-        """Create a deterministic, diverse 50-item onboarding pool."""
-        if len(all_products) <= 50:
+        """Create a deterministic, diverse onboarding pool."""
+        target_size = int(get_category_profile(category).onboarding_pool_size or 100)
+        if len(all_products) <= target_size:
             return [str(p["_id"]) for p in all_products]
         rng = self._rng_for(game_id, 0, "onboarding")
         products = list(all_products)
@@ -325,7 +551,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         if not values_by_field:
             # If a category has no usable numeric signal, keep deterministic sampling
             # and return a shuffled subset rather than failing the game start flow.
-            return [str(p["_id"]) for p in products[:50]]
+            return [str(p["_id"]) for p in products[:target_size]]
 
         # Pick the numeric axis with highest spread so low/mid/high buckets are meaningful.
         numeric_field = max(
@@ -334,19 +560,19 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         )
         values = [float(p.get(numeric_field) or 0.0) for p in products]
         sorted_values = sorted(values)
-        q1 = sorted_values[len(sorted_values) // 3]
-        q2 = sorted_values[(2 * len(sorted_values)) // 3]
-        low: list[dict[str, Any]] = []
-        mid: list[dict[str, Any]] = []
-        high: list[dict[str, Any]] = []
+        quantile_boundaries = [
+            sorted_values[int(len(sorted_values) * ratio)]
+            for ratio in (0.2, 0.4, 0.6, 0.8)
+        ]
+        buckets: list[list[dict[str, Any]]] = [[] for _ in range(5)]
         for p in products:
             value = float(p.get(numeric_field) or 0.0)
-            if value <= q1:
-                low.append(p)
-            elif value <= q2:
-                mid.append(p)
-            else:
-                high.append(p)
+            bucket_index = 4
+            for idx, boundary in enumerate(quantile_boundaries):
+                if value <= boundary:
+                    bucket_index = idx
+                    break
+            buckets[bucket_index].append(p)
 
         def round_robin_pick(bucket: list[dict[str, Any]], target: int) -> list[dict[str, Any]]:
             by_vendor: dict[str, list[dict[str, Any]]] = {}
@@ -372,13 +598,20 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 vendor_keys = next_vendor_keys
             return picks
 
-        chosen = round_robin_pick(low, 17) + round_robin_pick(mid, 17) + round_robin_pick(high, 16)
+        chosen: list[dict[str, Any]] = []
+        per_bucket = max(1, target_size // max(len(buckets), 1))
+        for index, bucket in enumerate(buckets):
+            remaining = max(0, target_size - len(chosen))
+            if remaining <= 0:
+                break
+            bucket_target = per_bucket if index < len(buckets) - 1 else remaining
+            chosen.extend(round_robin_pick(bucket, min(bucket_target, remaining)))
         chosen_ids = {str(p["_id"]) for p in chosen}
-        if len(chosen) < 50:
+        if len(chosen) < target_size:
             remainder = [p for p in products if str(p["_id"]) not in chosen_ids]
             rng.shuffle(remainder)
-            chosen.extend(remainder[: 50 - len(chosen)])
-        chosen = chosen[:50]
+            chosen.extend(remainder[: target_size - len(chosen)])
+        chosen = chosen[:target_size]
         rng.shuffle(chosen)
         return [str(p["_id"]) for p in chosen]
 
@@ -390,15 +623,17 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         model: PrefixCFModel,
         state: dict[str, Any],
     ) -> list[str]:
-        """Create a 50-item onboarding pool biased by seed preferences."""
-        if len(all_products) <= 50:
+        """Create a large onboarding pool biased by seed preferences."""
+        target_size = int(get_category_profile(category).onboarding_pool_size or 100)
+        if len(all_products) <= target_size:
             return [str(p["_id"]) for p in all_products]
         rng = self._rng_for(game_id, 0, "onboarding_seeded")
         disliked_tokens = set(state.get("disliked_tokens") or [])
         scored = self._rank_candidates(model, state, all_products, category, disliked_tokens)
 
-        likely = scored[:60]
-        tail = scored[60:]
+        likely_cutoff = min(len(scored), max(target_size, int(target_size * 1.2)))
+        likely = scored[:likely_cutoff]
+        tail = scored[likely_cutoff:]
 
         selected_ids: list[str] = []
         selected_set: set[str] = set()
@@ -415,14 +650,14 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 if len(selected_ids) >= target:
                     return
 
-        add_from_pool(likely, 30)
-        add_from_pool(tail, 50)
-        if len(selected_ids) < 50:
+        add_from_pool(likely, max(1, int(target_size * 0.55)))
+        add_from_pool(tail, target_size)
+        if len(selected_ids) < target_size:
             remainder = [str(p["_id"]) for _, p in scored if str(p["_id"]) not in selected_set]
             rng.shuffle(remainder)
-            selected_ids.extend(remainder[: 50 - len(selected_ids)])
+            selected_ids.extend(remainder[: target_size - len(selected_ids)])
 
-        selected_ids = selected_ids[:50]
+        selected_ids = selected_ids[:target_size]
         rng.shuffle(selected_ids)
         return selected_ids
 
@@ -606,88 +841,66 @@ class GameService(GamePlayMixin, GameInsightsMixin):
                 await db.execute(delete(PrefixRatingRecord).where(PrefixRatingRecord.session_id == existing_game.id))
                 existing_game.status = "onboarding"
                 existing_game.current_round = 0
-                existing_game.total_rounds = total_rounds
+                existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
                 existing_game.human_score = 0
                 existing_game.ai_score = 0
                 existing_game.mode = normalized_mode
-                existing_game.model_state = model.init_state()
+                existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
+                existing_game.model_state = self._ensure_redesign_state(model.init_state())
                 existing_game.onboarding_pool_ids = []
                 existing_game.onboarding_selected_ids = []
                 existing_game.onboarding_rating = None
                 existing_game.updated_at = now
                 await db.commit()
                 await db.refresh(existing_game)
-                return {
-                    "id": existing_game.id,
-                    "player_name": existing_game.player_name,
-                    "category": normalized_category,
-                    "mode": existing_game.mode or normalized_mode,
-                    "status": existing_game.status,
-                    "total_rounds": int(existing_game.total_rounds or total_rounds),
-                    "human_score": int(existing_game.human_score or 0),
-                    "ai_score": int(existing_game.ai_score or 0),
-                    "created_at": existing_game.created_at,
-                    "resumed": False,
-                }
+                return self._game_out_payload(existing_game, resumed=False)
 
             if existing_game.status in {"onboarding", "ready", "playing"}:
-                return {
-                    "id": existing_game.id,
-                    "player_name": existing_game.player_name,
-                    "category": normalized_category,
-                    "mode": existing_game.mode or normalized_mode,
-                    "status": existing_game.status,
-                    "total_rounds": int(existing_game.total_rounds or total_rounds),
-                    "human_score": int(existing_game.human_score or 0),
-                    "ai_score": int(existing_game.ai_score or 0),
-                    "created_at": existing_game.created_at,
-                    "resumed": True,
-                }
+                if int(existing_game.schema_version or self.LEGACY_SCHEMA_VERSION) < self.REDESIGN_SCHEMA_VERSION:
+                    existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
+                    existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
+                    existing_game.model_state = self._ensure_redesign_state(existing_game.model_state or model.init_state())
+                    existing_game.updated_at = now
+                    await db.commit()
+                    await db.refresh(existing_game)
+                return self._game_out_payload(existing_game, resumed=True)
 
             can_carry_profile = bool(
                 isinstance(existing_game.model_state, dict) and len(existing_game.onboarding_selected_ids or []) == 10
             )
             if can_carry_profile:
                 existing_game.status = "ready"
-                existing_game.total_rounds = int(existing_game.total_rounds or 0) + int(total_rounds)
+                existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
+                existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
+                existing_game.model_state = self._ensure_redesign_state(existing_game.model_state or model.init_state())
             else:
                 existing_game.status = "onboarding"
                 existing_game.current_round = 0
-                existing_game.total_rounds = total_rounds
+                existing_game.total_rounds = self.DEFAULT_MATCH_STREAK_TARGET
                 existing_game.human_score = 0
                 existing_game.ai_score = 0
                 existing_game.mode = normalized_mode
-                existing_game.model_state = model.init_state()
+                existing_game.schema_version = self.REDESIGN_SCHEMA_VERSION
+                existing_game.model_state = self._ensure_redesign_state(model.init_state())
                 existing_game.onboarding_pool_ids = []
                 existing_game.onboarding_selected_ids = []
                 existing_game.onboarding_rating = None
             existing_game.updated_at = now
             await db.commit()
             await db.refresh(existing_game)
-            return {
-                "id": existing_game.id,
-                "player_name": existing_game.player_name,
-                "category": normalized_category,
-                "mode": existing_game.mode or normalized_mode,
-                "status": existing_game.status,
-                "total_rounds": int(existing_game.total_rounds or total_rounds),
-                "human_score": int(existing_game.human_score or 0),
-                "ai_score": int(existing_game.ai_score or 0),
-                "created_at": existing_game.created_at,
-                "resumed": True,
-            }
+            return self._game_out_payload(existing_game, resumed=True)
 
         game = GameRecord(
-            schema_version=2,
+            schema_version=self.REDESIGN_SCHEMA_VERSION,
             player_name=clean_name,
             category=normalized_category,
             mode=normalized_mode,
             status="onboarding",
             current_round=0,
-            total_rounds=total_rounds,
+            total_rounds=self.DEFAULT_MATCH_STREAK_TARGET,
             human_score=0,
             ai_score=0,
-            model_state=model.init_state(),
+            model_state=self._ensure_redesign_state(model.init_state()),
             onboarding_pool_ids=[],
             onboarding_selected_ids=[],
             onboarding_rating=None,
@@ -697,18 +910,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         db.add(game)
         await db.commit()
         await db.refresh(game)
-        return {
-            "id": game.id,
-            "player_name": game.player_name,
-            "category": normalized_category,
-            "mode": normalized_mode,
-            "status": game.status,
-            "total_rounds": game.total_rounds,
-            "human_score": game.human_score,
-            "ai_score": game.ai_score,
-            "created_at": game.created_at,
-            "resumed": False,
-        }
+        return self._game_out_payload(game, resumed=False)
 
     async def submit_feedback(
         self,
@@ -738,7 +940,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             raise ValueError("Selected product does not exist")
 
         product = products[0]
-        state = game.get("model_state") or model.init_state()
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
         self._align_state_to_feature_space(model, state)
         model.update_with_negative_feedback(state, product)
 
@@ -785,52 +987,26 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         like_product_ids = like_product_ids or []
         dislike_product_ids = dislike_product_ids or []
 
-        state = game.get("model_state") or model.init_state()
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
         self._align_state_to_feature_space(model, state)
-
-        def build_seed_product(source: dict[str, list[str]]) -> dict[str, Any]:
-            payload: dict[str, Any] = {"category": category}
-            for key, values in source.items():
-                if not values:
-                    continue
-                payload[key] = values
-            return payload
-
-        if likes:
-            product = build_seed_product(likes)
-            model.update_with_seed(state, product, weight=0.45)
-
-        if dislikes:
-            product = build_seed_product(dislikes)
-            model.update_with_negative_feedback(state, product, weight=0.45)
-            tokens, _ = extract_feature_tokens(product, category)
-            disliked_tokens = set(state.get("disliked_tokens") or [])
-            disliked_tokens.update(tokens)
-            state["disliked_tokens"] = list(disliked_tokens)
-
-        if like_product_ids:
-            products = await self._get_products_by_ids(
-                db,
-                like_product_ids,
-                projection=self._feature_projection(category),
-            )
-            for product in products:
-                model.update_with_seed(state, product, weight=0.6)
-
-        if dislike_product_ids:
-            products = await self._get_products_by_ids(
-                db,
-                dislike_product_ids,
-                projection=self._feature_projection(category),
-            )
-            disliked_tokens = set(state.get("disliked_tokens") or [])
-            for product in products:
-                model.update_with_negative_feedback(state, product, weight=0.6)
-                tokens, _ = extract_feature_tokens(product, category)
-                disliked_tokens.update(tokens)
-            state["disliked_tokens"] = list(disliked_tokens)
+        state = await self._apply_seed_preferences_to_state(
+            db,
+            model,
+            state,
+            category=category,
+            likes=likes,
+            dislikes=dislikes,
+            like_product_ids=like_product_ids,
+            dislike_product_ids=dislike_product_ids,
+        )
 
         state["seeded"] = True
+        state["seed_preferences"] = {
+            "likes": likes,
+            "dislikes": dislikes,
+            "like_product_ids": like_product_ids,
+            "dislike_product_ids": dislike_product_ids,
+        }
 
         game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
         if game_row:
@@ -839,6 +1015,106 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         await db.commit()
 
         return {"accepted": True}
+
+    async def update_preferences(
+        self,
+        db: AsyncSession,
+        game_id: str,
+        *,
+        active_preference_ids: list[str],
+    ) -> dict[str, Any]:
+        """Rebuild the active preference deck and refresh the live round if needed."""
+        game = await self._get_game(db, game_id)
+        if not self._is_redesigned_game(game):
+            raise ValueError("Preference editing is only available for redesigned sessions")
+        if len(game.get("onboarding_selected_ids") or []) != 10:
+            raise ValueError("Onboarding must be completed before editing preferences")
+
+        model = await self._ensure_model(db)
+        category = self._game_category(game)
+        current_state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
+        allowed_ids = set(await self._historical_selection_sequence(db, game))
+        cleaned_ids = list(dict.fromkeys(str(pid) for pid in active_preference_ids if str(pid) in allowed_ids))
+        if not cleaned_ids:
+            raise ValueError("Keep at least one preference in your deck")
+
+        rebuilt_state = self._ensure_redesign_state(model.init_state())
+        self._align_state_to_feature_space(model, rebuilt_state)
+        seed_preferences = current_state.get("seed_preferences") or self._empty_seed_preferences()
+        await self._apply_seed_preferences_to_state(
+            db,
+            model,
+            rebuilt_state,
+            category=category,
+            likes=seed_preferences.get("likes") or {},
+            dislikes=seed_preferences.get("dislikes") or {},
+            like_product_ids=seed_preferences.get("like_product_ids") or [],
+            dislike_product_ids=seed_preferences.get("dislike_product_ids") or [],
+        )
+
+        preference_products = await self._get_products_by_ids(
+            db,
+            cleaned_ids,
+            projection=self._feature_projection(category),
+        )
+        if len(preference_products) != len(cleaned_ids):
+            raise ValueError("One or more selected preferences no longer exist")
+
+        for product in preference_products:
+            model.update_with_selection(rebuilt_state, product, is_exception=False)
+        if game.get("onboarding_rating") is not None:
+            model.update_with_prefix_rating(rebuilt_state, int(game["onboarding_rating"]))
+
+        rebuilt_state["active_preference_ids"] = cleaned_ids
+        rebuilt_state["seed_preferences"] = seed_preferences
+        rebuilt_state["seeded"] = bool(current_state.get("seeded"))
+        rebuilt_state["disliked_ids"] = list(current_state.get("disliked_ids") or [])
+        rebuilt_state["disliked_tokens"] = list(current_state.get("disliked_tokens") or [])
+        rebuilt_state["rounds_played"] = int(current_state.get("rounds_played") or game.get("current_round") or 0)
+        rebuilt_state["total_matches"] = int(current_state.get("total_matches") or game.get("human_score") or 0)
+        rebuilt_state["current_match_streak"] = int(current_state.get("current_match_streak") or 0)
+        rebuilt_state["longest_match_streak"] = int(current_state.get("longest_match_streak") or 0)
+        rebuilt_state["match_streak_target"] = int(
+            current_state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET
+        )
+
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.model_state = rebuilt_state
+            game_row.updated_at = datetime.utcnow()
+
+        active_round = await db.scalar(
+            select(GameRoundRecord).where(
+                and_(
+                    GameRoundRecord.game_id == str(game["_id"]),
+                    GameRoundRecord.round_number == int(game.get("current_round") or 0) + 1,
+                    GameRoundRecord.completed.is_(False),
+                )
+            )
+        )
+        if active_round is not None:
+            await db.delete(active_round)
+
+        await db.commit()
+
+        updated_game = {**game, "model_state": rebuilt_state}
+        round_payload = None
+        if game.get("status") == "playing":
+            round_payload = await self.start_round(db, game_id)
+
+        return {
+            "game_id": str(game["_id"]),
+            "schema_version": self.REDESIGN_SCHEMA_VERSION,
+            "category": category,
+            "category_copy": category_copy(category),
+            "display_schema": category_display_schema(category),
+            "preference_deck": await self._preference_deck(db, updated_game),
+            "current_match_streak": int(rebuilt_state.get("current_match_streak") or 0),
+            "longest_match_streak": int(rebuilt_state.get("longest_match_streak") or 0),
+            "match_streak_target": int(rebuilt_state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET),
+            "rounds_played": int(rebuilt_state.get("rounds_played") or 0),
+            "round": round_payload,
+        }
 
     async def get_resume_state(
         self,

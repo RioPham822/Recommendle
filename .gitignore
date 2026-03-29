@@ -24,6 +24,7 @@ backend/.env.*
 .claude/
 .codex/
 .github/
+output/
 
 # ── IDE / Editor ──
 .vscode/

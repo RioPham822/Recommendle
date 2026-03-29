@@ -1,4 +1,10 @@
-import React from 'react';
+const RATING_GUIDE = [
+  { value: 1, title: 'Off target', description: 'This set feels scattered. The AI should treat it as a weak starting signal.' },
+  { value: 2, title: 'Loose fit', description: 'A few items belong, but the set still feels noisy.' },
+  { value: 3, title: 'Mixed', description: 'This is a decent snapshot of your taste, with some compromises.' },
+  { value: 4, title: 'Strong signal', description: 'Most of this set feels like you.' },
+  { value: 5, title: 'Exactly right', description: 'This set nails your taste and should strongly guide the AI.' },
+];
 
 export default function SetRatingModal({
   open,
@@ -9,28 +15,34 @@ export default function SetRatingModal({
   onSubmit,
   categoryCopy = {},
 }) {
-  if (!open) {
-    return null;
-  }
+  if (!open) return null;
 
-  const plural = categoryCopy.item_plural || 'products';
+  const plural = categoryCopy.item_plural || 'items';
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Set rating">
-      <div className="modal-card">
-        <h3>Rate Your Initial Set</h3>
-        <p>How coherent does your selected set of 10 {plural} feel?</p>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="How do you feel about your set?">
+      <div className="modal-card rating-modal">
+        <p className="eyebrow">Last setup step</p>
+        <h3>How do you feel about your set?</h3>
+        <p className="rating-modal__copy">
+          This tells the AI how much confidence it should place in your opening 10 {plural}. A stronger score means
+          your starter set is a clearer picture of your taste.
+        </p>
 
-        <div className="rating-control">
-          <input
-            type="range"
-            min="1"
-            max="5"
-            value={rating}
-            onChange={(event) => setRating(Number(event.target.value))}
-            disabled={loading}
-          />
-          <strong>{rating}/5</strong>
+        <div className="rating-scale">
+          {RATING_GUIDE.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`rating-choice ${rating === option.value ? 'active' : ''}`}
+              onClick={() => setRating(option.value)}
+              disabled={loading}
+            >
+              <span className="rating-choice__value">{option.value}</span>
+              <strong>{option.title}</strong>
+              <p>{option.description}</p>
+            </button>
+          ))}
         </div>
 
         <div className="modal-actions">
@@ -38,7 +50,7 @@ export default function SetRatingModal({
             Back
           </button>
           <button type="button" onClick={onSubmit} disabled={loading}>
-            {loading ? 'Submitting...' : 'Submit & Start Round 1'}
+            {loading ? 'Saving...' : 'Start round 1'}
           </button>
         </div>
       </div>
