@@ -41,6 +41,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
     REDESIGN_SCHEMA_VERSION = 3
     LEGACY_SCHEMA_VERSION = 2
     DEFAULT_MATCH_STREAK_TARGET = 5
+    MIN_MOVIE_VOTE_COUNT = 1000
 
     def __init__(self):
         """Initialize shared recommender and in-memory scoring cache."""
@@ -79,6 +80,20 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         if normalized in {"classic", "beta"}:
             return normalized
         raise ValueError(f"Unsupported game mode '{mode}'")
+
+    @classmethod
+    def _filter_visible_products(cls, products: list[dict[str, Any]], category: str) -> list[dict[str, Any]]:
+        if category != "movies":
+            return products
+        visible: list[dict[str, Any]] = []
+        for product in products:
+            try:
+                vote_count = int(product.get("vote_count") or 0)
+            except (TypeError, ValueError):
+                vote_count = 0
+            if vote_count >= cls.MIN_MOVIE_VOTE_COUNT:
+                visible.append(product)
+        return visible
 
     @classmethod
     def _is_redesigned_game(cls, game: dict[str, Any] | None) -> bool:
@@ -522,7 +537,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         if cached and cached.get("count") == int(current_count or 0):
             return cached["products"]
         rows = (await db.execute(select(ProductRecord).where(ProductRecord.category == category))).scalars().all()
-        products = [record_to_dict(row) for row in rows]
+        products = self._filter_visible_products([record_to_dict(row) for row in rows], category)
         self._scoring_catalog_cache[category] = {
             "count": int(current_count or 0),
             "products": products,
@@ -533,7 +548,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
     async def _all_products_for_onboarding_sample(self, db: AsyncSession, category: str) -> list[dict[str, Any]]:
         """Load all products for onboarding sampling (no caching)."""
         rows = (await db.execute(select(ProductRecord).where(ProductRecord.category == category))).scalars().all()
-        return [record_to_dict(row) for row in rows]
+        return self._filter_visible_products([record_to_dict(row) for row in rows], category)
 
     async def _warm_scoring_catalog(self, db: AsyncSession, category: str) -> None:
         """Best-effort cache warmup to reduce first-round latency."""
@@ -809,10 +824,14 @@ class GameService(GamePlayMixin, GameInsightsMixin):
 
     async def get_categories(self, db: AsyncSession) -> list[dict[str, Any]]:
         """Return configured categories with currently available product counts."""
-        rows = (
-            await db.execute(select(ProductRecord.category, func.count(ProductRecord.id)).group_by(ProductRecord.category))
-        ).all()
-        counts = {str(category): int(count) for category, count in rows}
+        rows = (await db.execute(select(ProductRecord.category, ProductRecord.data))).all()
+        counts: dict[str, int] = {}
+        for category, data in rows:
+            normalized_category = str(category or "")
+            product = {"category": normalized_category, **dict(data or {})}
+            if not self._filter_visible_products([product], normalized_category):
+                continue
+            counts[normalized_category] = counts.get(normalized_category, 0) + 1
         results: list[dict[str, Any]] = []
         for category in supported_categories():
             copy = category_copy(category)
@@ -1260,4 +1279,3 @@ class GameService(GamePlayMixin, GameInsightsMixin):
 
 
 game_service = GameService()
-

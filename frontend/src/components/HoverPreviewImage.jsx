@@ -11,14 +11,22 @@ export default function HoverPreviewImage({
   alt,
   fallbackText = 'No image',
   fallbackClassName = '',
+  previewContent = null,
+  previewPlacement = 'side',
 }) {
+  const [previewVisible, setPreviewVisible] = useState(false);
   const [previewStyle, setPreviewStyle] = useState(null);
 
   function showPreview(event) {
-    if (!src || typeof window === 'undefined' || window.matchMedia('(hover: none)').matches) return;
+    if ((!src && !previewContent) || typeof window === 'undefined' || window.matchMedia('(hover: none)').matches) return;
+    setPreviewVisible(true);
+    if (previewPlacement === 'top') {
+      setPreviewStyle(null);
+      return;
+    }
     const rect = event.currentTarget.getBoundingClientRect();
-    const width = Math.min(window.innerWidth * 0.34, 420);
-    const height = Math.min(window.innerHeight * 0.64, 520);
+    const width = Math.min(window.innerWidth * 0.24, 260);
+    const height = Math.min(window.innerHeight * 0.42, 320);
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
@@ -55,6 +63,7 @@ export default function HoverPreviewImage({
   }
 
   function hidePreview() {
+    setPreviewVisible(false);
     setPreviewStyle(null);
   }
 
@@ -74,9 +83,13 @@ export default function HoverPreviewImage({
         )}
       </div>
 
-      {previewStyle && src && (
-        <div className="hover-preview-image__zoom" style={previewStyle} aria-hidden="true">
-          <img src={src} alt="" loading="lazy" />
+      {previewVisible && (previewContent || src) && (
+        <div
+          className={`hover-preview-image__zoom ${previewPlacement === 'top' ? 'hover-preview-image__zoom--top' : ''}`}
+          style={previewPlacement === 'top' ? undefined : previewStyle}
+          aria-hidden="true"
+        >
+          {previewContent || <img src={src} alt="" loading="lazy" />}
         </div>
       )}
     </div>

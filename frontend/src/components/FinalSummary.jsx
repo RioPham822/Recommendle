@@ -141,12 +141,15 @@ export default function FinalSummary({
               {summary.top5_recommendations.map((recommendation, index) => (
                 <li key={recommendation.id}>
                   <span>#{index + 1}</span>
-                  <HoverPreviewImage
-                    src={recommendation.image_url}
-                    alt={recommendation.title}
-                    fallbackClassName="result-top-list__fallback"
-                  />
-                  <div>
+                  <div className="recommendation-list__media">
+                    <HoverPreviewImage
+                      src={recommendation.image_url}
+                      alt={recommendation.title}
+                      fallbackClassName="result-top-list__fallback"
+                      previewPlacement="top"
+                    />
+                  </div>
+                  <div className="recommendation-list__body">
                     <strong>{recommendation.title}</strong>
                     <p>{recommendation.subtitle || recommendation.vendor || category}</p>
                   </div>
@@ -176,12 +179,15 @@ export default function FinalSummary({
               {summary.hidden_gems_products.map((recommendation, index) => (
                 <li key={recommendation.id}>
                   <span>#{index + 1}</span>
-                  <HoverPreviewImage
-                    src={recommendation.image_url}
-                    alt={recommendation.title}
-                    fallbackClassName="result-top-list__fallback"
-                  />
-                  <div>
+                  <div className="recommendation-list__media">
+                    <HoverPreviewImage
+                      src={recommendation.image_url}
+                      alt={recommendation.title}
+                      fallbackClassName="result-top-list__fallback"
+                      previewPlacement="top"
+                    />
+                  </div>
+                  <div className="recommendation-list__body">
                     <strong>{recommendation.title}</strong>
                     <p>{recommendation.subtitle || recommendation.vendor || category}</p>
                   </div>

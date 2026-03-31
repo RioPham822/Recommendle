@@ -116,6 +116,10 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [view]);
+
+  useEffect(() => {
     if (!isAuthenticated) return;
     setPlayerName((previous) => previous.trim() || displayName || getDisplayName() || '');
   }, [isAuthenticated, displayName]);
@@ -679,5 +683,4 @@ export default function App() {
     </main>
   );
 }
-
 

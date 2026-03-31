@@ -37,6 +37,11 @@ export default function ProductCard({
 
   const hintText = product.predicted_match_features?.slice(0, 5) || [];
 
+  function handleCardClick(event) {
+    onClick?.();
+    event.currentTarget.blur();
+  }
+
   return (
     <div
       className={[
@@ -49,7 +54,7 @@ export default function ProductCard({
       <button
         type="button"
         className={`product-card mode-${mode}`}
-        onClick={onClick}
+        onClick={handleCardClick}
       >
         {showSelectionBadge && (
           <span className="product-card__selection">
