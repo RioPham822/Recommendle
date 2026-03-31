@@ -1,4 +1,4 @@
-function CategoryCard({ category, active, disabled, onSelect }) {
+﻿function CategoryCard({ category, active, disabled, onSelect }) {
   return (
     <button
       type="button"
@@ -55,7 +55,7 @@ export default function WelcomeScreen({
             <article className="welcome-step">
               <span>1</span>
               <div>
-                <strong>Choose 10 items</strong>
+                <strong>Choose 1 to 10 items</strong>
                 <p>Pick from 100.</p>
               </div>
             </article>
@@ -202,3 +202,4 @@ export default function WelcomeScreen({
     </section>
   );
 }
+

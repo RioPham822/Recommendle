@@ -90,7 +90,7 @@ export default function RoundArena({
                 </div>
                 <div>
                   <strong>{selectedProduct.title}</strong>
-                  <p>{selectedProduct.subtitle || selectedProduct.vendor || 'Unknown'}</p>
+                  {mode === 'feature' && <p>{selectedProduct.subtitle || selectedProduct.vendor || 'Unknown'}</p>}
                 </div>
               </div>
             )}

@@ -1,4 +1,4 @@
-"""Category profile metadata and feature token/humanization helpers."""
+﻿"""Category profile metadata and feature token/humanization helpers."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         item_plural="pens",
         vendor_label="Brand",
         mode_caption="Pictures highlights the full pen photography. Specifications highlights brand, price, nib options, and material clues.",
-        onboarding_action="Choose 10 pens from a pool of 100 to build your taste profile.",
+        onboarding_action="Choose 1 to 10 pens from a pool of 100 to build your taste profile.",
         onboarding_pool_size=100,
         top_recommendations_label="AI's Top 5 Picks for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
@@ -86,7 +86,7 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         item_plural="movies",
         vendor_label="Studio",
         mode_caption="Pictures highlights posters and key art. Specifications highlights genre, studio, runtime, language, and rating clues.",
-        onboarding_action="Choose 10 movies from a pool of 100 to build your taste profile.",
+        onboarding_action="Choose 1 to 10 movies from a pool of 100 to build your taste profile.",
         onboarding_pool_size=100,
         top_recommendations_label="AI's Top 5 Movies for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
@@ -128,7 +128,7 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
             "Pictures highlights cover art. Specifications highlights genre, platform, studio, release year, "
             "and rating signals."
         ),
-        onboarding_action="Choose 10 games from a pool of 100 to build your taste profile.",
+        onboarding_action="Choose 1 to 10 games from a pool of 100 to build your taste profile.",
         onboarding_pool_size=100,
         top_recommendations_label="AI's Top 5 Games for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
@@ -453,3 +453,4 @@ def numeric_preference_label(raw: str, weight: float) -> str:
     if field == "hypes":
         return "Trending Titles" if positive else "Less Trending Titles"
     return f"{field.replace('_', ' ').title()} Preference"
+

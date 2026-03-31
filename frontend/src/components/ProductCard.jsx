@@ -1,6 +1,5 @@
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import { formatPrice } from '../lib/api';
 
 export default function ProductCard({
   product,
@@ -14,7 +13,6 @@ export default function ProductCard({
   selectionNumber = 0,
   showPredictionHints = false,
 }) {
-  const isMovie = product.category === 'movies';
   const hasValue = (value) => {
     if (value === null || value === undefined) return false;
     if (typeof value === 'string') return value.trim() !== '';
@@ -27,7 +25,6 @@ export default function ProductCard({
     .filter(([, value]) => hasValue(value))
     .slice(0, compact ? 3 : 5);
 
-  const featureTokens = [...(product.meta_badges || []), ...((product.tags || []).slice(0, compact ? 2 : 4))].slice(0, 5);
   const showMedia = mode !== 'feature';
   const showSelectionBadge = selectionNumber > 0 || selected;
 
@@ -37,6 +34,8 @@ export default function ProductCard({
     }
     return String(value);
   }
+
+  const hintText = product.predicted_match_features?.slice(0, 5) || [];
 
   return (
     <div
@@ -70,22 +69,6 @@ export default function ProductCard({
 
         <div className="product-card__body">
           <h3>{product.title}</h3>
-          <p className="product-card__subtitle">{product.subtitle || product.vendor || 'Unknown'}</p>
-
-          {mode === 'visual' && (
-            <>
-              {!isMovie && (typeof product.price_min === 'number' || typeof product.price_max === 'number') && (
-                <p className="product-card__price">{formatPrice(product.price_min, product.price_max)}</p>
-              )}
-              {featureTokens.length > 0 && (
-                <div className="tag-list">
-                  {featureTokens.map((token) => (
-                    <span key={token}>{token}</span>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
 
           {mode === 'feature' && attributes.length > 0 && (
             <div className="feature-list">
@@ -112,11 +95,11 @@ export default function ProductCard({
         </button>
       )}
 
-      {showPredictionHints && product.predicted_match_features?.length > 0 && (
+      {showPredictionHints && hintText.length > 0 && (
         <div className="product-card__insights">
           <p>AI thinks you like</p>
           <ul>
-            {product.predicted_match_features.slice(0, 5).map((feature) => (
+            {hintText.map((feature) => (
               <li key={feature}>{feature}</li>
             ))}
           </ul>

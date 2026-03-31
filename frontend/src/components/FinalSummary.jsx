@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import { getGameSummary } from '../lib/api';
+import HoverPreviewImage from './HoverPreviewImage';
 
 function MiniBarChart({ data, label, className = '' }) {
   if (!data.length) {
@@ -140,9 +141,18 @@ export default function FinalSummary({
               {summary.top5_recommendations.map((recommendation, index) => (
                 <li key={recommendation.id}>
                   <span>#{index + 1}</span>
+                  <HoverPreviewImage
+                    src={recommendation.image_url}
+                    alt={recommendation.title}
+                    fallbackClassName="result-top-list__fallback"
+                  />
                   <div>
                     <strong>{recommendation.title}</strong>
                     <p>{recommendation.subtitle || recommendation.vendor || category}</p>
+                  </div>
+                  <div className="recommendation-list__meta">
+                    <span className="result-top-list__score-label">AI match score</span>
+                    <strong>{recommendation.score?.toFixed(2) ?? 'N/A'}</strong>
                   </div>
                 </li>
               ))}
@@ -166,9 +176,18 @@ export default function FinalSummary({
               {summary.hidden_gems_products.map((recommendation, index) => (
                 <li key={recommendation.id}>
                   <span>#{index + 1}</span>
+                  <HoverPreviewImage
+                    src={recommendation.image_url}
+                    alt={recommendation.title}
+                    fallbackClassName="result-top-list__fallback"
+                  />
                   <div>
                     <strong>{recommendation.title}</strong>
                     <p>{recommendation.subtitle || recommendation.vendor || category}</p>
+                  </div>
+                  <div className="recommendation-list__meta">
+                    <span className="result-top-list__score-label">Hidden gem score</span>
+                    <strong>{recommendation.score?.toFixed(2) ?? 'N/A'}</strong>
                   </div>
                 </li>
               ))}

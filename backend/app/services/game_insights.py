@@ -220,7 +220,7 @@ class GameInsightsMixin:
             "longest_match_streak": longest_match_streak,
             "match_streak_target": match_streak_target,
             "rounds_played": self._rounds_played(game),
-            "onboarding_complete": len(game.get("onboarding_selected_ids", [])) == 10,
+            "onboarding_complete": 1 <= len(game.get("onboarding_selected_ids", [])) <= self.MAX_ONBOARDING_SELECTIONS,
             "onboarding_selected_count": len(game.get("onboarding_selected_ids", [])),
             "round_in_progress": active_round.round_number if active_round else None,
         }

@@ -1,5 +1,6 @@
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import CancelRoundedIcon from '@mui/icons-material/CancelRounded';
+import HoverPreviewImage from './HoverPreviewImage';
 
 function ResultFocusCard({ title, product, accent, showMedia }) {
   return (
@@ -26,6 +27,7 @@ export default function RoundResultPanel({ result, categoryCopy = {}, mode = 'vi
   const isMatch = result.preference_match;
   const singular = categoryCopy.item_singular || 'item';
   const showMedia = mode !== 'feature';
+  const hiddenPatternDetected = Boolean(result.hidden_preference_detected);
   const outcomeTitle = isMatch ? 'Preference Match!' : 'Not a match yet';
   const outcomeCopy = isMatch
     ? `Your ${singular} landed in the AI's top 5.`
@@ -79,24 +81,27 @@ export default function RoundResultPanel({ result, categoryCopy = {}, mode = 'vi
                 <div className="result-top-list__rank">#{index + 1}</div>
                 {showMedia && (
                   <div className="result-top-list__media">
-                    {candidate.image_url ? (
-                      <img src={candidate.image_url} alt={candidate.title} loading="lazy" />
-                    ) : (
-                      <div className="result-top-list__fallback">No image</div>
-                    )}
+                    <HoverPreviewImage
+                      src={candidate.image_url}
+                      alt={candidate.title}
+                      fallbackClassName="result-top-list__fallback"
+                    />
                   </div>
                 )}
                 <div className="result-top-list__body">
                   <strong>{candidate.title}</strong>
-                  <span>{candidate.subtitle || candidate.vendor || 'Unknown'}</span>
-                  <div className="tag-list">
-                    {(candidate.predicted_match_features || []).slice(0, 5).map((feature) => (
-                      <span key={feature}>{feature}</span>
-                    ))}
-                  </div>
+                  {!showMedia && <span>{candidate.subtitle || candidate.vendor || 'Unknown'}</span>}
+                  {!showMedia && (
+                    <div className="tag-list">
+                      {(candidate.predicted_match_features || []).slice(0, 5).map((feature) => (
+                        <span key={feature}>{feature}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="result-top-list__meta">
-                  <span>{candidate.score.toFixed(2)}</span>
+                  <span className="result-top-list__score-label">AI match score</span>
+                  <strong>{candidate.score.toFixed(2)}</strong>
                   {matched && <CheckCircleRoundedIcon fontSize="small" />}
                 </div>
               </li>
@@ -105,22 +110,20 @@ export default function RoundResultPanel({ result, categoryCopy = {}, mode = 'vi
         </ul>
       </div>
 
-      {(result.ai_explanation.hidden_preference_hints?.length > 0 || result.ai_explanation.hidden_preferences?.length > 0) && (
+      {hiddenPatternDetected && (
         <div className="panel">
-          <p className="eyebrow">Hidden pattern diagnostics</p>
-          <h3>What changed this round</h3>
+          <p className="eyebrow">Hidden preference detected</p>
+          <h3>Sequential pattern the model noticed</h3>
           <div className="result-diagnostics">
             {result.ai_explanation.hidden_preference_hints?.map((hint) => (
               <p key={hint}>{hint}</p>
             ))}
           </div>
-          {result.ai_explanation.hidden_preferences?.length > 0 && (
-            <div className="result-pill-group">
-              {result.ai_explanation.hidden_preferences.slice(0, 5).map(([name]) => (
-                <span key={name} className="feature-tag hidden">{name}</span>
-              ))}
-            </div>
-          )}
+          <div className="result-pill-group">
+            {result.ai_explanation.hidden_preferences.slice(0, 5).map(([name]) => (
+              <span key={name} className="feature-tag hidden">{name}</span>
+            ))}
+          </div>
         </div>
       )}
 

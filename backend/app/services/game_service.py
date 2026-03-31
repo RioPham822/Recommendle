@@ -1,4 +1,4 @@
-"""Core game-service composition root and shared utility methods."""
+﻿"""Core game-service composition root and shared utility methods."""
 
 from __future__ import annotations
 
@@ -142,7 +142,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         onboarding_selected_ids = (
             game.onboarding_selected_ids if isinstance(game, GameRecord) else game.get("onboarding_selected_ids")
         ) or []
-        return isinstance(state, dict) and len(onboarding_selected_ids) == 10
+        return isinstance(state, dict) and 1 <= len(onboarding_selected_ids) <= GamePlayMixin.MAX_ONBOARDING_SELECTIONS
 
     @staticmethod
     def _align_state_to_feature_space(model: PrefixCFModel, state: dict[str, Any]) -> bool:
@@ -1104,7 +1104,8 @@ class GameService(GamePlayMixin, GameInsightsMixin):
         game = await self._get_game(db, game_id)
         if not self._is_redesigned_game(game):
             raise ValueError("Preference editing is only available for redesigned sessions")
-        if len(game.get("onboarding_selected_ids") or []) != 10:
+        onboarding_count = len(game.get("onboarding_selected_ids") or [])
+        if not self.MIN_ONBOARDING_SELECTIONS <= onboarding_count <= self.MAX_ONBOARDING_SELECTIONS:
             raise ValueError("Onboarding must be completed before editing preferences")
 
         model = await self._ensure_model(db)
@@ -1259,3 +1260,4 @@ class GameService(GamePlayMixin, GameInsightsMixin):
 
 
 game_service = GameService()
+

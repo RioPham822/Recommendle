@@ -1,19 +1,108 @@
 import { useEffect, useMemo, useState } from 'react';
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
+import ThumbDownAltOutlinedIcon from '@mui/icons-material/ThumbDownAltOutlined';
+import ThumbUpAltOutlinedIcon from '@mui/icons-material/ThumbUpAltOutlined';
 import { searchProducts } from '../lib/api';
 
-function toggleToken(field, value, state, setState, opposingState, setOpposingState, maxSelections) {
-  const current = state[field] || [];
-  if (current.includes(value)) {
-    setState((prev) => ({ ...prev, [field]: current.filter((item) => item !== value) }));
+function getSignalState(field, value, likes, dislikes) {
+  if ((likes[field] || []).includes(value)) return 'like';
+  if ((dislikes[field] || []).includes(value)) return 'dislike';
+  return 'neutral';
+}
+
+function toggleSignal(field, value, nextState, likes, setLikes, dislikes, setDislikes, maxSelections) {
+  const currentState = getSignalState(field, value, likes, dislikes);
+  if (currentState === nextState) {
+    const targetSetter = nextState === 'like' ? setLikes : setDislikes;
+    const currentValues = nextState === 'like' ? likes[field] || [] : dislikes[field] || [];
+    targetSetter((prev) => ({ ...prev, [field]: currentValues.filter((item) => item !== value) }));
     return;
   }
-  if (current.length >= maxSelections) return;
-  const opposing = opposingState[field] || [];
-  if (opposing.includes(value)) {
-    setOpposingState((prev) => ({ ...prev, [field]: opposing.filter((item) => item !== value) }));
+
+  const targetState = nextState === 'like' ? likes : dislikes;
+  const targetSetter = nextState === 'like' ? setLikes : setDislikes;
+  const opposingState = nextState === 'like' ? dislikes : likes;
+  const opposingSetter = nextState === 'like' ? setDislikes : setLikes;
+  const targetValues = targetState[field] || [];
+  if (targetValues.length >= maxSelections) return;
+
+  if ((opposingState[field] || []).includes(value)) {
+    opposingSetter((prev) => ({
+      ...prev,
+      [field]: (prev[field] || []).filter((item) => item !== value),
+    }));
   }
-  setState((prev) => ({ ...prev, [field]: [...(prev[field] || []), value] }));
+
+  targetSetter((prev) => ({
+    ...prev,
+    [field]: [...(prev[field] || []), value],
+  }));
+}
+
+function getProductImage(product) {
+  if (product.image_url) return product.image_url;
+  const images = product.data?.images;
+  if (Array.isArray(images) && images[0]?.url) return images[0].url;
+  return '';
+}
+
+function getProductMeta(product) {
+  return product.vendor
+    || product.data?.directors?.[0]
+    || product.data?.platforms?.[0]
+    || product.data?.production_companies?.[0]
+    || product.category;
+}
+
+function SeedSignalTile({
+  field,
+  option,
+  likes,
+  dislikes,
+  setLikes,
+  setDislikes,
+  maxSelections,
+  loading,
+}) {
+  const state = getSignalState(field, option, likes, dislikes);
+  const likeCount = (likes[field] || []).length;
+  const dislikeCount = (dislikes[field] || []).length;
+  const likeDisabled = loading || (state !== 'like' && likeCount >= maxSelections);
+  const dislikeDisabled = loading || (state !== 'dislike' && dislikeCount >= maxSelections);
+
+  return (
+    <article className={`seed-signal-tile is-${state}`}>
+      <div className="seed-signal-tile__header">
+        <strong>{option}</strong>
+        <span>
+          {state === 'like' && 'Bias toward this'}
+          {state === 'dislike' && 'Bias away from this'}
+          {state === 'neutral' && 'Not set'}
+        </span>
+      </div>
+      <div className="seed-signal-tile__actions">
+        <button
+          type="button"
+          className={`seed-signal-action seed-signal-action--like ${state === 'like' ? 'active' : ''}`}
+          onClick={() => toggleSignal(field, option, 'like', likes, setLikes, dislikes, setDislikes, maxSelections)}
+          disabled={likeDisabled}
+        >
+          <ThumbUpAltOutlinedIcon fontSize="inherit" />
+          <span>Like</span>
+        </button>
+        <button
+          type="button"
+          className={`seed-signal-action seed-signal-action--dislike ${state === 'dislike' ? 'active' : ''}`}
+          onClick={() => toggleSignal(field, option, 'dislike', likes, setLikes, dislikes, setDislikes, maxSelections)}
+          disabled={dislikeDisabled}
+        >
+          <ThumbDownAltOutlinedIcon fontSize="inherit" />
+          <span>Dislike</span>
+        </button>
+      </div>
+    </article>
+  );
 }
 
 function SeedSection({ title, description, sections, likes, dislikes, setLikes, setDislikes, maxSelections, loading }) {
@@ -28,41 +117,23 @@ function SeedSection({ title, description, sections, likes, dislikes, setLikes, 
           <article key={section.field} className="seed-card">
             <div className="seed-card__head">
               <strong>{section.label}</strong>
-              <span>Up to {maxSelections}</span>
+              <span>{`${(likes[section.field] || []).length} liked • ${(dislikes[section.field] || []).length} disliked`}</span>
             </div>
-            <div className="seed-card__rows">
-              <div>
-                <p className="seed-card__label">I like...</p>
-                <div className="seed-chip-row">
-                  {section.options.map((option) => (
-                    <button
-                      key={`like-${section.field}-${option}`}
-                      type="button"
-                      className={`seed-chip ${(likes[section.field] || []).includes(option) ? 'selected' : ''}`}
-                      onClick={() => toggleToken(section.field, option, likes, setLikes, dislikes, setDislikes, maxSelections)}
-                      disabled={loading}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="seed-card__label">Less of this...</p>
-                <div className="seed-chip-row">
-                  {section.options.map((option) => (
-                    <button
-                      key={`dislike-${section.field}-${option}`}
-                      type="button"
-                      className={`seed-chip seed-chip--muted ${(dislikes[section.field] || []).includes(option) ? 'selected' : ''}`}
-                      onClick={() => toggleToken(section.field, option, dislikes, setDislikes, likes, setLikes, maxSelections)}
-                      disabled={loading}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
+            <p className="seed-card__label">{`Pick up to ${maxSelections} to bias toward and ${maxSelections} to bias away.`}</p>
+            <div className="seed-signal-grid">
+              {section.options.map((option) => (
+                <SeedSignalTile
+                  key={`${section.field}-${option}`}
+                  field={section.field}
+                  option={option}
+                  likes={likes}
+                  dislikes={dislikes}
+                  setLikes={setLikes}
+                  setDislikes={setDislikes}
+                  maxSelections={maxSelections}
+                  loading={loading}
+                />
+              ))}
             </div>
           </article>
         ))}
@@ -214,9 +285,27 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
             <div className="seed-picked-list">
               {likedTitles.length === 0 && <span className="seed-empty">Nothing added yet.</span>}
               {likedTitles.map((item) => (
-                <button key={item.id} type="button" className="seed-chip selected" onClick={() => removeTitle(item.id, setLikedTitles)}>
-                  {item.title}
-                </button>
+                <article key={item.id} className="seed-picked-item seed-picked-item--like">
+                  <div className="seed-picked-item__media">
+                    {getProductImage(item) ? (
+                      <img src={getProductImage(item)} alt={item.title} loading="lazy" />
+                    ) : (
+                      <div className="seed-picked-item__fallback">No image</div>
+                    )}
+                  </div>
+                  <div className="seed-picked-item__body">
+                    <strong>{item.title}</strong>
+                    <span>{getProductMeta(item)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="seed-picked-item__remove"
+                    onClick={() => removeTitle(item.id, setLikedTitles)}
+                    aria-label={`Remove ${item.title} from liked titles`}
+                  >
+                    <CloseRoundedIcon fontSize="small" />
+                  </button>
+                </article>
               ))}
             </div>
           </div>
@@ -225,9 +314,27 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
             <div className="seed-picked-list">
               {dislikedTitles.length === 0 && <span className="seed-empty">Nothing added yet.</span>}
               {dislikedTitles.map((item) => (
-                <button key={item.id} type="button" className="seed-chip seed-chip--muted selected" onClick={() => removeTitle(item.id, setDislikedTitles)}>
-                  {item.title}
-                </button>
+                <article key={item.id} className="seed-picked-item seed-picked-item--dislike">
+                  <div className="seed-picked-item__media">
+                    {getProductImage(item) ? (
+                      <img src={getProductImage(item)} alt={item.title} loading="lazy" />
+                    ) : (
+                      <div className="seed-picked-item__fallback">No image</div>
+                    )}
+                  </div>
+                  <div className="seed-picked-item__body">
+                    <strong>{item.title}</strong>
+                    <span>{getProductMeta(item)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="seed-picked-item__remove"
+                    onClick={() => removeTitle(item.id, setDislikedTitles)}
+                    aria-label={`Remove ${item.title} from disliked titles`}
+                  >
+                    <CloseRoundedIcon fontSize="small" />
+                  </button>
+                </article>
               ))}
             </div>
           </div>
@@ -236,11 +343,16 @@ export default function BetaSeedScreen({ category, onSkip, onSubmit, loading }) 
         <div className="seed-results">
           {results.map((item) => (
             <article key={item.id} className="seed-result">
+              <div className="seed-result__media">
+                {getProductImage(item) ? (
+                  <img src={getProductImage(item)} alt={item.title} loading="lazy" />
+                ) : (
+                  <div className="seed-result__fallback">No image</div>
+                )}
+              </div>
               <div className="seed-result__main">
                 <strong>{item.title}</strong>
-                <span>
-                  {item.vendor || item.data?.directors?.[0] || item.data?.platforms?.[0] || item.category}
-                </span>
+                <span>{getProductMeta(item)}</span>
               </div>
               <div className="seed-result__actions">
                 <button

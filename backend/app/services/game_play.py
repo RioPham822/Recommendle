@@ -36,6 +36,9 @@ def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, 
 class GamePlayMixin:
     """Composable gameplay operations used by the main game service."""
 
+    MIN_ONBOARDING_SELECTIONS = 1
+    MAX_ONBOARDING_SELECTIONS = 10
+
     async def get_onboarding(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
         """Return or create the onboarding pool for a game."""
         game = await self._get_game(db, game_id)
@@ -94,12 +97,15 @@ class GamePlayMixin:
         game = await self._get_game(db, game_id)
         model = await self._ensure_model(db)
         category = self._game_category(game)
+        selection_count = len(selected_product_ids)
 
         if game.get("onboarding_selected_ids"):
             raise ValueError("Onboarding already submitted for this game")
-        if len(selected_product_ids) != 10:
-            raise ValueError("You must select exactly 10 products")
-        if len(set(selected_product_ids)) != 10:
+        if not self.MIN_ONBOARDING_SELECTIONS <= selection_count <= self.MAX_ONBOARDING_SELECTIONS:
+            raise ValueError(
+                f"You must select between {self.MIN_ONBOARDING_SELECTIONS} and {self.MAX_ONBOARDING_SELECTIONS} products"
+            )
+        if len(set(selected_product_ids)) != selection_count:
             raise ValueError("Duplicate products are not allowed")
 
         pool_ids = set(game.get("onboarding_pool_ids", []))
@@ -113,7 +119,7 @@ class GamePlayMixin:
             selected_product_ids,
             projection={**self._feature_projection(category), "title": 1, "images": 1},
         )
-        if len(selected_products) != 10:
+        if len(selected_products) != selection_count:
             raise ValueError("One or more selected products were not found")
 
         state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
@@ -162,7 +168,7 @@ class GamePlayMixin:
         longest_match_streak = int(state.get("longest_match_streak") or 0)
         match_streak_target = int(state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET)
 
-        if len(game.get("onboarding_selected_ids", [])) != 10:
+        if not self.MIN_ONBOARDING_SELECTIONS <= len(game.get("onboarding_selected_ids", [])) <= self.MAX_ONBOARDING_SELECTIONS:
             raise ValueError("Onboarding is incomplete")
         if current_match_streak >= match_streak_target or game.get("status") == "completed":
             raise ValueError("Game is complete")
@@ -537,7 +543,7 @@ class GamePlayMixin:
         longest_match_streak = int(state.get("longest_match_streak") or 0)
         match_streak_target = int(state.get("match_streak_target") or self.DEFAULT_MATCH_STREAK_TARGET)
 
-        if len(game.get("onboarding_selected_ids", [])) != 10:
+        if not self.MIN_ONBOARDING_SELECTIONS <= len(game.get("onboarding_selected_ids", [])) <= self.MAX_ONBOARDING_SELECTIONS:
             raise ValueError("Onboarding is incomplete")
         if current_match_streak >= match_streak_target or game.get("status") == "completed":
             raise ValueError("Game is complete")

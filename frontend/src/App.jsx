@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import logo from './assets/logo.svg';
@@ -47,6 +47,8 @@ const MIN_CATEGORY_ITEMS = 100;
 const CATEGORY_RETRY_MS = 2500;
 const CATEGORY_POLL_MS = 10000;
 const TRAINING_MODE = 'beta';
+const MIN_ONBOARDING_SELECTIONS = 1;
+const MAX_ONBOARDING_SELECTIONS = 10;
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -73,12 +75,15 @@ export default function App() {
   const [roundData, setRoundData] = useState(null);
   const [selectedRoundPick, setSelectedRoundPick] = useState('');
   const [roundResult, setRoundResult] = useState(null);
+  const [seenHiddenPreferenceNames, setSeenHiddenPreferenceNames] = useState([]);
+  const [previousHiddenPreferenceNames, setPreviousHiddenPreferenceNames] = useState([]);
   const [lessLikeIds, setLessLikeIds] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [seedBusy, setSeedBusy] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
   const [mode, setMode] = useState('visual');
   const [error, setError] = useState('');
+  const [seedPreferences, setSeedPreferences] = useState(null);
   const [busy, setBusy] = useState({
     start: false,
     onboarding: false,
@@ -94,6 +99,7 @@ export default function App() {
   const activeCategory = game?.category || selectedCategory;
   const activeLogo = theme === 'dark' ? logoDark : logo;
   const showHeaderBrand = !(isAuthenticated && view === VIEW.WELCOME);
+  const homeHeader = !isAuthenticated || view === VIEW.WELCOME;
   const activeCategoryCount = categories.filter((category) => (Number(category.available_count) || 0) >= MIN_CATEGORY_ITEMS).length;
   const categoryProgress = categories.length
     ? Math.round(
@@ -248,7 +254,10 @@ export default function App() {
     setRoundData(null);
     setSelectedRoundPick('');
     setRoundResult(null);
+    setSeenHiddenPreferenceNames([]);
+    setPreviousHiddenPreferenceNames([]);
     setLessLikeIds([]);
+    setSeedPreferences(null);
     setError('');
     setResumableGame(null);
     setResumeLoading(false);
@@ -285,8 +294,11 @@ export default function App() {
       const created = await startGame(playerName.trim(), selectedCategory, freshStart, TRAINING_MODE);
       setGame(created);
       setOnboarding(null);
+      setSeedPreferences(null);
       setRoundData(null);
       setRoundResult(null);
+      setSeenHiddenPreferenceNames([]);
+      setPreviousHiddenPreferenceNames([]);
       setSelectedIds([]);
       setLessLikeIds([]);
       if (created.status === 'onboarding') {
@@ -312,7 +324,7 @@ export default function App() {
       if (previous.includes(productId)) {
         return previous.filter((id) => id !== productId);
       }
-      if (previous.length >= 10) {
+      if (previous.length >= MAX_ONBOARDING_SELECTIONS) {
         return previous;
       }
       return [...previous, productId];
@@ -320,8 +332,8 @@ export default function App() {
   }
 
   async function handleSubmitOnboarding() {
-    if (!game || selectedIds.length !== 10) {
-      setError('Choose exactly 10 items before continuing.');
+    if (!game || selectedIds.length < MIN_ONBOARDING_SELECTIONS || selectedIds.length > MAX_ONBOARDING_SELECTIONS) {
+      setError(`Choose between ${MIN_ONBOARDING_SELECTIONS} and ${MAX_ONBOARDING_SELECTIONS} items before continuing.`);
       return;
     }
     setBusy((previous) => ({ ...previous, onboarding: true }));
@@ -343,6 +355,7 @@ export default function App() {
     setSeedBusy(true);
     setError('');
     try {
+      setSeedPreferences(payload);
       await submitSeedPreferences(
         game.id,
         payload.likes,
@@ -354,6 +367,7 @@ export default function App() {
       setOnboarding(onboardingPayload);
       setView(VIEW.ONBOARDING);
     } catch (seedError) {
+      setSeedPreferences(null);
       setError(seedError.message || 'Could not save your preference signals.');
     } finally {
       setSeedBusy(false);
@@ -378,7 +392,32 @@ export default function App() {
     setError('');
     try {
       const result = await submitRoundPick(game.id, roundData.round_number, selectedRoundPick, lessLikeIds);
-      setRoundResult(result);
+      const hiddenPreferenceNames = (result.ai_explanation?.hidden_preferences || [])
+        .map(([name]) => String(name || '').trim().toLowerCase())
+        .filter(Boolean);
+      const hiddenHints = result.ai_explanation?.hidden_preference_hints || [];
+      const seenHiddenSet = new Set(seenHiddenPreferenceNames);
+      const previousHiddenSet = new Set(previousHiddenPreferenceNames);
+      const recurringHiddenPreferenceNames = hiddenPreferenceNames.filter((name) => previousHiddenSet.has(name));
+      const hasNewRecurringHiddenPreference = recurringHiddenPreferenceNames.some((name) => !seenHiddenSet.has(name));
+      const hiddenPreferenceDetected = (
+        result.round_number >= 4
+        && hiddenHints.length > 0
+        && hasNewRecurringHiddenPreference
+      );
+
+      setRoundResult({
+        ...result,
+        hidden_preference_detected: hiddenPreferenceDetected,
+      });
+      setSeenHiddenPreferenceNames((previous) => {
+        const merged = new Set(previous);
+        if (hiddenPreferenceDetected) {
+          recurringHiddenPreferenceNames.forEach((name) => merged.add(name));
+        }
+        return [...merged];
+      });
+      setPreviousHiddenPreferenceNames(hiddenPreferenceNames);
       applyGameProgress(result);
       setView(VIEW.RESULT);
     } catch (pickError) {
@@ -471,7 +510,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <header className={`app-shell__header ${isAuthenticated ? 'authenticated' : 'public'}`}>
+      <header className={`app-shell__header ${isAuthenticated ? 'authenticated' : 'public'} ${homeHeader ? 'app-shell__header--home' : 'app-shell__header--blurred'}`}>
         {showHeaderBrand ? (
           <button
             type="button"
@@ -569,8 +608,9 @@ export default function App() {
                 onToggle={handleToggleOnboarding}
                 onOpenRating={() => setRatingModalOpen(true)}
                 mode={mode}
-                categoryCopy={onboarding.category_copy || {}}
-              />
+              categoryCopy={onboarding.category_copy || {}}
+              seedPreferences={seedPreferences}
+            />
               <SetRatingModal
                 open={ratingModalOpen}
                 rating={rating}
@@ -639,3 +679,5 @@ export default function App() {
     </main>
   );
 }
+
+

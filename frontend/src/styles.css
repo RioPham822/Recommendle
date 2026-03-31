@@ -2,28 +2,41 @@
 
 :root {
   color-scheme: light;
-  --bg: #f5f6f8;
-  --bg-accent: #eef2f8;
-  --surface: rgba(255, 255, 255, 0.92);
+  --bg: #ffffff;
+  --bg-accent: #faf9fb;
+  --surface: rgba(255, 255, 255, 0.96);
   --surface-strong: #ffffff;
-  --surface-muted: #f5f7fb;
-  --ink: #101320;
-  --ink-soft: #4a556f;
-  --ink-faint: #7a8499;
-  --border: rgba(28, 39, 122, 0.14);
-  --border-soft: rgba(28, 39, 122, 0.08);
-  --accent: #e89035;
-  --accent-strong: #de542b;
-  --accent-soft: rgba(232, 144, 53, 0.14);
-  --accent-red: #b8363d;
-  --accent-purple: #8b2968;
-  --cool: #1c277a;
-  --cool-soft: rgba(58, 111, 172, 0.14);
-  --cool-blue: #3a6fac;
-  --success: #51914b;
-  --success-soft: rgba(81, 145, 75, 0.14);
-  --danger: #b8363d;
-  --danger-soft: rgba(184, 54, 61, 0.14);
+  --surface-muted: #f5f5f5;
+  --ink: #1a1a1a;
+  --ink-soft: #4a4a4a4;
+  --ink-faint: #7a7a7a7
+  --border: rgba(26, 26, 26, 0.18);
+  --border-soft: rgba(26, 26, 26, 0.08);
+
+  /* Decidio Brand Colors */
+  --decidio-yellow: #e89035;
+  --decidio-orange: #de542b;
+  --decidio-red: #b8363d;
+  --decidio-purple: #8b2968;
+  --decidio-navy: #1c277a;
+  --decidio-blue: #3a6fac;
+  --decidio-green: #51914b;
+
+  /* Semantic aliases */
+  --accent: var(--decidio-yellow);
+  --accent-strong: var(--decidio-orange);
+  --accent-soft: rgba(232, 144, 53, 0.16);
+  --accent-red: var(--decidio-red);
+  --accent-purple: var(--decidio-purple);
+  --navy: var(--decidio-navy);
+  --navy-soft: rgba(28, 39, 122, 0.16);
+  --cool: var(--decidio-blue);
+  --cool-soft: rgba(58, 111, 172, 0.16);
+  --success: var(--decidio-green);
+  --success-soft: rgba(81, 145, 75, 0.16);
+  --danger: var(--decidio-red);
+  --danger-soft: rgba(184, 54, 61, 0.16);
+
   --shadow-lg: 0 24px 60px rgba(16, 19, 32, 0.08);
   --shadow-md: 0 14px 36px rgba(16, 19, 32, 0.08);
   --shadow-sm: 0 8px 20px rgba(16, 19, 32, 0.05);
@@ -36,30 +49,43 @@
 
 body[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #05070d;
-  --bg-accent: #0d1220;
-  --surface: rgba(10, 13, 22, 0.9);
-  --surface-strong: #101521;
-  --surface-muted: rgba(17, 22, 34, 0.94);
-  --ink: #f5f7fb;
-  --ink-soft: #cad1df;
-  --ink-faint: #8f9ab2;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-soft: rgba(255, 255, 255, 0.05);
-  --accent: #e89035;
-  --accent-strong: #de542b;
-  --accent-soft: rgba(232, 144, 53, 0.18);
-  --accent-red: #b8363d;
-  --accent-purple: #8b2968;
-  --cool: #3a6fac;
+  --bg: #000000;
+  --bg-accent: #0a0a0f;
+  --surface: rgba(15, 15, 15, 0.92);
+  --surface-strong: #0a0a0f;
+  --surface-muted: #0f0f0f;
+  --ink: #ffffff;
+  --ink-soft: #e0e0e0;
+  --ink-faint: #a0a0a0;
+  --border: rgba(255, 255, 255, 0.12);
+  --border-soft: rgba(255, 255, 255, 0.06);
+
+  /* Decidio Brand Colors - same for dark mode */
+  --decidio-yellow: #e89035;
+  --decidio-orange: #de542b;
+  --decidio-red: #b8363d;
+  --decidio-purple: #8b2968;
+  --decidio-navy: #1c277a;
+  --decidio-blue: #3a6fac;
+  --decidio-green: #51914b;
+
+  /* Semantic aliases */
+  --accent: var(--decidio-yellow);
+  --accent-strong: var(--decidio-orange);
+  --accent-soft: rgba(232, 144, 53, 0.2);
+  --accent-red: var(--decidio-red);
+  --accent-purple: var(--decidio-purple);
+  --navy: var(--decidio-navy);
+  --navy-soft: rgba(28, 39, 122, 0.2);
+  --cool: var(--decidio-blue);
   --cool-soft: rgba(58, 111, 172, 0.2);
-  --cool-blue: #3a6fac;
-  --success: #51914b;
+  --success: var(--decidio-green);
   --success-soft: rgba(81, 145, 75, 0.2);
-  --danger: #ff8b90;
-  --danger-soft: rgba(184, 54, 61, 0.18);
-  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.38);
-  --shadow-md: 0 14px 36px rgba(0, 0, 0, 0.28);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(184, 54, 61, 0.2);
+
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 14px 36px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 8px 20px rgba(0, 0, 0, 0.2);
 }
 

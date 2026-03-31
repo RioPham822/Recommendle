@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 
 from app.services.game_service import GameService
 
@@ -75,20 +75,31 @@ class GameServiceTests(unittest.TestCase):
         self.assertEqual(reset["rounds_played"], 0)
         self.assertEqual(reset["total_matches"], 0)
 
-    def test_has_carryable_profile_requires_model_state_and_ten_onboarding_ids(self):
+    def test_has_carryable_profile_requires_model_state_and_completed_onboarding(self):
         carryable = {
             "model_state": {"user_vec": [0.2, 0.8]},
             "onboarding_selected_ids": [str(index) for index in range(10)],
         }
-        missing_picks = {
+        minimal_completed = {
             "model_state": {"user_vec": [0.2, 0.8]},
             "onboarding_selected_ids": ["1", "2"],
         }
+        missing_picks = {
+            "model_state": {"user_vec": [0.2, 0.8]},
+            "onboarding_selected_ids": [],
+        }
+        too_many_picks = {
+            "model_state": {"user_vec": [0.2, 0.8]},
+            "onboarding_selected_ids": [str(index) for index in range(11)],
+        }
 
         self.assertTrue(GameService._has_carryable_profile(carryable))
+        self.assertTrue(GameService._has_carryable_profile(minimal_completed))
         self.assertFalse(GameService._has_carryable_profile(missing_picks))
+        self.assertFalse(GameService._has_carryable_profile(too_many_picks))
         self.assertFalse(GameService._has_carryable_profile({"onboarding_selected_ids": [str(index) for index in range(10)]}))
 
 
 if __name__ == "__main__":
     unittest.main()
+

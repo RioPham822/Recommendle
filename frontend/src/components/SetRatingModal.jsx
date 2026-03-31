@@ -1,4 +1,4 @@
-const RATING_GUIDE = [
+﻿const RATING_GUIDE = [
   { value: 1, title: 'Off target', description: 'This set feels scattered. The AI should treat it as a weak starting signal.' },
   { value: 2, title: 'Loose fit', description: 'A few items belong, but the set still feels noisy.' },
   { value: 3, title: 'Mixed', description: 'This is a decent snapshot of your taste, with some compromises.' },
@@ -24,7 +24,7 @@ export default function SetRatingModal({
       <div className="modal-card rating-modal">
         <h3>How do you feel about your set?</h3>
         <p className="rating-modal__copy">
-          This tells the AI how strongly it should trust your opening 10 {plural}.
+          This tells the AI how strongly it should trust your opening set of {plural}.
         </p>
 
         <div className="rating-scale">
@@ -55,3 +55,4 @@ export default function SetRatingModal({
     </div>
   );
 }
+
