@@ -1,13 +1,30 @@
+﻿function CategoryCard({ category, active, disabled, onSelect }) {
+  return (
+    <button
+      type="button"
+      className={`category-card ${active ? 'active' : ''}`}
+      onClick={() => onSelect(category.id)}
+      disabled={disabled}
+    >
+      <div className="category-card__header">
+        <span className="category-card__title">{category.display_name}</span>
+        <span className={`category-card__availability ${disabled ? 'pending' : 'ready'}`}>
+          {disabled ? 'Loading' : 'Ready'}
+        </span>
+      </div>
+      <strong className="category-card__count">{category.available_count}</strong>
+      <span className="category-card__copy">available {category.item_plural}</span>
+    </button>
+  );
+}
+
 export default function WelcomeScreen({
   logoSrc,
-  showLogo = true,
   playerName,
   setPlayerName,
   categories = [],
   selectedCategory,
   setSelectedCategory,
-  gameMode = 'classic',
-  setGameMode,
   onStart,
   onStartFresh,
   loading,
@@ -17,151 +34,150 @@ export default function WelcomeScreen({
   categoryLoadError = '',
   categoryProgress = 0,
   readyCategoryCount = 0,
-  leaderboard,
+  leaderboard = [],
   onViewPlayer,
 }) {
-  const activeCategory = categories.find((c) => c.id === selectedCategory);
-  const plural = activeCategory?.item_plural || 'items';
-  const singular = activeCategory?.item_singular || 'item';
-  const totalCategoryCount = categories.length;
-  const showDatasetLoading = categoriesLoading || (totalCategoryCount > 0 && readyCategoryCount < totalCategoryCount);
-  const progressValue = Math.max(0, Math.min(categoryProgress, 100));
+  const activeCategory = categories.find((entry) => entry.id === selectedCategory);
+  const readyCount = categories.filter((entry) => entry.available_count >= 100).length;
+  const showDatasetLoading = categoriesLoading || readyCount < categories.length;
 
   return (
     <section className="screen shell welcome-screen">
-      <div className="hero">
-        {showLogo && <img src={logoSrc} alt="Recommendle" className="app-logo" style={{ marginBottom: '0.75rem' }} />}
-        <h1>Can you out-pick an AI model?</h1>
-        <p className="subtitle">
-          Build a taste profile, then go head-to-head for 5 rounds. Pick your favorite before the AI reveals its prediction.
-        </p>
-      </div>
-
-      <div className="how-to-play">
-        <div className="step-tile">
-          <div className="step-num">1</div>
-          <p>Choose 10 {plural} from a pool of 50 to build your taste profile.</p>
-        </div>
-        <div className="step-tile">
-          <div className="step-num">2</div>
-          <p>Rate your initial set so the AI can learn your preferences.</p>
-        </div>
-        <div className="step-tile">
-          <div className="step-num">3</div>
-          <p>Pick your favorite {singular} each round and see if the AI can match you.</p>
-        </div>
-      </div>
-
-      <div className="start-form">
-        <label htmlFor="player-name">Player name</label>
-        <input
-          id="player-name"
-          value={playerName}
-          onChange={(event) => setPlayerName(event.target.value)}
-          placeholder="Enter your name"
-          maxLength={80}
-          disabled={loading}
-        />
-
-        <label htmlFor="category-select">Category</label>
-        <select
-          id="category-select"
-          className="category-select"
-          value={selectedCategory}
-          onChange={(event) => setSelectedCategory(event.target.value)}
-          disabled={loading || categoriesLoading || categories.length === 0}
-        >
-          {categories.map((category) => (
-            <option key={category.id} value={category.id} disabled={category.available_count < 50}>
-              {category.display_name} ({category.available_count}){category.available_count < 50 ? ' - ingest required' : ''}
-            </option>
-          ))}
-        </select>
-
-        <label htmlFor="mode-select">Game mode</label>
-        <div className="mode-toggle" role="radiogroup" aria-label="Game mode">
-          <button
-            type="button"
-            className={`mode-pill ${gameMode === 'classic' ? 'active' : ''}`}
-            onClick={() => setGameMode && setGameMode('classic')}
-            disabled={loading}
-            role="radio"
-            aria-checked={gameMode === 'classic'}
-          >
-            Classic
-          </button>
-          <button
-            type="button"
-            className={`mode-pill ${gameMode === 'beta' ? 'active' : ''}`}
-            onClick={() => setGameMode && setGameMode('beta')}
-            disabled={loading}
-            role="radio"
-            aria-checked={gameMode === 'beta'}
-          >
-            Beta
-          </button>
-        </div>
-        <p className="mode-help">
-          Classic keeps the original rules. Beta adds experimental feedback tools like “Less like this.”
-        </p>
-
-        {showDatasetLoading && (
-          <div className="dataset-loading" role="status" aria-live="polite">
-            <div className="dataset-loading-head">
-              <span>
-                {categoriesLoading && totalCategoryCount === 0 ? 'Loading categories...' : 'Preparing datasets...'}
-              </span>
-              {!categoriesLoading && <strong>{progressValue}%</strong>}
-            </div>
-            <div className="dataset-progress-track">
-              <div
-                className={`dataset-progress-fill${categoriesLoading && totalCategoryCount === 0 ? ' indeterminate' : ''}`}
-                style={categoriesLoading && totalCategoryCount === 0 ? undefined : { width: `${Math.max(6, progressValue)}%` }}
-              />
-            </div>
-            {!categoriesLoading && totalCategoryCount > 0 && (
-              <p className="dataset-loading-copy">
-                Ready categories: {readyCategoryCount}/{totalCategoryCount}
-              </p>
-            )}
-            {categoryLoadError && (
-              <p className="dataset-loading-error">
-                Backend is still warming up. Retrying automatically...
-              </p>
-            )}
-          </div>
-        )}
-
-        <button type="button" onClick={onStart} disabled={loading || categoriesLoading || resumeLoading || !playerName.trim()}>
-          {loading ? 'Starting...' : resumable?.exists ? 'Continue' : 'Play'}
-        </button>
-        <button
-          type="button"
-          className="secondary-btn"
-          onClick={onStartFresh}
-          disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !resumable?.can_start_fresh}
-        >
-          Start Fresh
-        </button>
-        {resumable?.exists && (
-          <p className="dataset-loading-copy">
-            Resume available for this category: round {Math.min((resumable.current_round || 0) + 1, resumable.total_rounds || 5)}
-            {' '}of {resumable.total_rounds || 5}.
+      <div className="welcome-layout">
+        <div className="welcome-hero">
+          <img src={logoSrc} alt="Recommendle" className="welcome-hero__logo" />
+          <h1>Can you train an AI to choose for you?</h1>
+          <p className="welcome-hero__subtitle">
+            Build a taste profile and see how fast the AI can match you five rounds in a row.
           </p>
-        )}
+
+          <div className="welcome-steps">
+            <article className="welcome-step">
+              <span>1</span>
+              <div>
+                <strong>Choose 1 to 10 items</strong>
+                <p>Pick from 100.</p>
+              </div>
+            </article>
+            <article className="welcome-step">
+              <span>2</span>
+              <div>
+                <strong>How do you feel about your set?</strong>
+                <p>Rate the signal.</p>
+              </div>
+            </article>
+            <article className="welcome-step">
+              <span>3</span>
+              <div>
+                <strong>Build a streak of matches</strong>
+                <p>Reach five in a row.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div className="panel welcome-panel">
+          <div className="welcome-panel__block">
+            <label className="welcome-panel__label" htmlFor="player-name">
+              Player name
+            </label>
+            <input
+              id="player-name"
+              value={playerName}
+              onChange={(event) => setPlayerName(event.target.value)}
+              placeholder="How should we label this run?"
+              maxLength={80}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="welcome-panel__block">
+            <div className="welcome-panel__heading">
+              <div>
+                <p className="eyebrow">Choose a category</p>
+                <h2>Pick a category</h2>
+              </div>
+              <span className="welcome-panel__count">
+                {activeCategory?.display_name || 'Select one'}
+              </span>
+            </div>
+            <div className="category-card-grid">
+              {categories.map((category) => (
+                <CategoryCard
+                  key={category.id}
+                  category={category}
+                  active={category.id === selectedCategory}
+                  disabled={category.available_count < 100}
+                  onSelect={setSelectedCategory}
+                />
+              ))}
+            </div>
+          </div>
+
+          {showDatasetLoading && (
+            <div className="dataset-loading" role="status" aria-live="polite">
+              <div className="dataset-loading__header">
+                <span>{categoriesLoading ? 'Loading datasets...' : 'Preparing every category for the 100-item onboarding pool'}</span>
+                <strong>{Math.round(categoryProgress)}%</strong>
+              </div>
+              <div className="dataset-loading__track">
+                <div className="dataset-loading__fill" style={{ width: `${Math.max(8, categoryProgress)}%` }} />
+              </div>
+              <p className="dataset-loading__copy">
+                Ready categories: {readyCategoryCount}/{categories.length || 0}
+              </p>
+              {categoryLoadError && <p className="dataset-loading__error">Backend is still warming up. Retrying automatically.</p>}
+            </div>
+          )}
+
+          <div className="welcome-panel__cta">
+            <button
+              type="button"
+              onClick={onStart}
+              disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !activeCategory}
+            >
+              {loading ? 'Starting...' : resumable?.exists ? 'Continue run' : 'Start training'}
+            </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={onStartFresh}
+              disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !resumable?.can_start_fresh}
+            >
+              Start fresh
+            </button>
+          </div>
+
+          {resumable?.exists && (
+            <div className="welcome-panel__resume">
+              <strong>Resume ready</strong>
+              <p>
+                Continue from round {(resumable.current_round || 0) + 1}.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      {leaderboard && leaderboard.length > 0 && (
-        <div className="panel leaderboard-panel welcome-leaderboard">
-          <h3>Leaderboard</h3>
+      <div className="panel leaderboard-panel welcome-leaderboard">
+        <div className="leaderboard-panel__header">
+          <div>
+            <p className="eyebrow">Co-op leaderboard</p>
+            <h3>Fastest completed runs</h3>
+          </div>
+          <span>{activeCategory?.display_name || 'Category'}</span>
+        </div>
+        {leaderboard.length === 0 ? (
+          <p className="muted">No completed runs yet for this category.</p>
+        ) : (
           <table>
             <thead>
               <tr>
                 <th>Rank</th>
                 <th>Player</th>
-                <th>Human</th>
-                <th>AI</th>
-                <th>Delta</th>
+                <th>Rounds</th>
+                <th>Match Rate</th>
+                <th>Best Streak</th>
               </tr>
             </thead>
             <tbody>
@@ -170,19 +186,20 @@ export default function WelcomeScreen({
                   key={`${entry.player_name}-${entry.created_at}`}
                   className="leaderboard-row-clickable"
                   onClick={() => onViewPlayer && onViewPlayer(entry.player_name)}
-                  title={`View ${entry.player_name}'s stats`}
+                  title={`View ${entry.player_name}'s run history`}
                 >
                   <td>{entry.rank}</td>
                   <td className="player-name-cell">{entry.player_name}</td>
-                  <td>{entry.human_score}</td>
-                  <td>{entry.ai_score}</td>
-                  <td>{entry.score_difference >= 0 ? '+' : ''}{entry.score_difference}</td>
+                  <td>{entry.rounds_to_complete || entry.rounds_completed}</td>
+                  <td>{Math.round((entry.match_rate || 0) * 100)}%</td>
+                  <td>{entry.longest_match_streak || 0}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }
+

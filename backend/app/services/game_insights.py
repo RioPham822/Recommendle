@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import (
@@ -18,7 +18,7 @@ from ..category_profiles import (
     normalize_category,
     numeric_preference_label,
 )
-from ..db import GameRecord, GameRoundRecord
+from ..db import GameRecord, GameRoundRecord, record_to_dict
 
 
 def humanize_feature_list(raw_list: list[tuple[str, float]]) -> list[tuple[str, float]]:
@@ -35,6 +35,7 @@ class GameInsightsMixin:
         model = await self._ensure_model(db)
         category = self._game_category(game)
         profile = get_category_profile(category)
+        is_redesigned = self._is_redesigned_game(game)
         if game.get("status") != "completed":
             raise ValueError("Game is not yet completed")
 
@@ -50,14 +51,18 @@ class GameInsightsMixin:
             .all()
         )
 
+        state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
         round_stats = []
         cumulative_ai = 0
         cumulative_human = 0
+        running_streak = 0
         for rnd in rounds:
-            ai_correct = bool(rnd.ai_correct)
+            preference_match = bool(rnd.ai_correct)
+            ai_correct = preference_match
             cumulative_ai += int(rnd.ai_points or 0)
             cumulative_human += int(rnd.human_points or 0)
             post = rnd.post_metrics or {}
+            running_streak = running_streak + 1 if preference_match else 0
             round_stats.append(
                 {
                     "round_number": rnd.round_number,
@@ -68,10 +73,11 @@ class GameInsightsMixin:
                     "predicted_rating": post.get("predicted_prefix_rating", 3.0),
                     "cumulative_ai": cumulative_ai,
                     "cumulative_human": cumulative_human,
+                    "preference_match": preference_match,
+                    "current_match_streak": running_streak,
                 }
             )
 
-        state = game.get("model_state") or model.init_state()
         if self._align_state_to_feature_space(model, state):
             game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
             if game_row:
@@ -148,11 +154,16 @@ class GameInsightsMixin:
                     f"The {profile.item_plural} below match these latent preferences."
                 )
 
-        total = len(rounds)
+        total = self._rounds_played(game) if is_redesigned else len(rounds)
+        if total <= 0:
+            total = len(rounds)
         correct = sum(1 for r in rounds if r.ai_correct)
         exact = sum(1 for r in rounds if r.ai_pick_id == r.human_pick_id)
+        current_match_streak, longest_match_streak, match_streak_target = self._match_progress(game)
+        total_matches = int(state.get("total_matches") or correct)
         return {
             "game_id": str(game["_id"]),
+            "schema_version": int(game.get("schema_version") or self.LEGACY_SCHEMA_VERSION),
             "player_name": game["player_name"],
             "category": category,
             "mode": game.get("mode") or "classic",
@@ -160,6 +171,12 @@ class GameInsightsMixin:
             "total_rounds": total,
             "human_score": game["human_score"],
             "ai_score": game["ai_score"],
+            "rounds_played": total,
+            "total_matches": total_matches,
+            "match_rate": (total_matches / total) if total else 0.0,
+            "current_match_streak": current_match_streak,
+            "longest_match_streak": longest_match_streak,
+            "match_streak_target": match_streak_target,
             "accuracy": {
                 "top3_correct": correct,
                 "exact_correct": exact,
@@ -179,6 +196,7 @@ class GameInsightsMixin:
         """Return current game progress and scoreboard state."""
         game = await self._get_game(db, game_id)
         category = self._game_category(game)
+        current_match_streak, longest_match_streak, match_streak_target = self._match_progress(game)
         active_round = await db.scalar(
             select(GameRoundRecord)
             .where(and_(GameRoundRecord.game_id == str(game["_id"]), GameRoundRecord.completed.is_(False)))
@@ -187,6 +205,7 @@ class GameInsightsMixin:
         )
         return {
             "id": str(game["_id"]),
+            "schema_version": int(game.get("schema_version") or self.LEGACY_SCHEMA_VERSION),
             "player_name": game["player_name"],
             "category": category,
             "mode": game.get("mode") or "classic",
@@ -196,7 +215,12 @@ class GameInsightsMixin:
             "total_rounds": int(game.get("total_rounds", 10)),
             "human_score": int(game.get("human_score", 0)),
             "ai_score": int(game.get("ai_score", 0)),
-            "onboarding_complete": len(game.get("onboarding_selected_ids", [])) == 10,
+            "preference_deck": await self._preference_deck(db, game),
+            "current_match_streak": current_match_streak,
+            "longest_match_streak": longest_match_streak,
+            "match_streak_target": match_streak_target,
+            "rounds_played": self._rounds_played(game),
+            "onboarding_complete": 1 <= len(game.get("onboarding_selected_ids", [])) <= self.MAX_ONBOARDING_SELECTIONS,
             "onboarding_selected_count": len(game.get("onboarding_selected_ids", [])),
             "round_in_progress": active_round.round_number if active_round else None,
         }
@@ -213,11 +237,16 @@ class GameInsightsMixin:
             (
                 await db.execute(
                     select(GameRecord)
-                    .where(and_(GameRecord.status == "completed", GameRecord.category == normalized_category))
+                    .where(
+                        and_(
+                            GameRecord.status == "completed",
+                            GameRecord.category == normalized_category,
+                            GameRecord.schema_version >= self.REDESIGN_SCHEMA_VERSION,
+                        )
+                    )
                     .order_by(
-                        desc(GameRecord.human_score - GameRecord.ai_score),
-                        desc(GameRecord.human_score),
-                        GameRecord.created_at.asc(),
+                        GameRecord.current_round.asc(),
+                        GameRecord.updated_at.asc(),
                     )
                     .limit(int(limit))
                 )
@@ -225,19 +254,29 @@ class GameInsightsMixin:
             .scalars()
             .all()
         )
-        return [
-            {
-                "rank": index + 1,
-                "player_name": game.player_name,
-                "category": normalize_category(game.category),
-                "human_score": int(game.human_score),
-                "ai_score": int(game.ai_score),
-                "score_difference": int(game.human_score - game.ai_score),
-                "rounds_completed": int(game.current_round or 0),
-                "created_at": game.created_at,
-            }
-            for index, game in enumerate(games)
-        ]
+        entries: list[dict[str, Any]] = []
+        for index, game_row in enumerate(games):
+            game = record_to_dict(game_row)
+            state = self._ensure_redesign_state(game.get("model_state") or {})
+            rounds_completed = self._rounds_played(game)
+            total_matches = int(state.get("total_matches") or game.get("human_score") or 0)
+            entries.append(
+                {
+                    "rank": index + 1,
+                    "schema_version": int(game.get("schema_version") or self.LEGACY_SCHEMA_VERSION),
+                    "player_name": game["player_name"],
+                    "category": normalize_category(game["category"]),
+                    "human_score": int(game.get("human_score") or 0),
+                    "ai_score": int(game.get("ai_score") or 0),
+                    "score_difference": int((game.get("human_score") or 0) - (game.get("ai_score") or 0)),
+                    "rounds_completed": rounds_completed,
+                    "rounds_to_complete": rounds_completed,
+                    "longest_match_streak": int(state.get("longest_match_streak") or 0),
+                    "match_rate": (total_matches / rounds_completed) if rounds_completed else 0.0,
+                    "created_at": game["created_at"],
+                }
+            )
+        return entries
 
     async def get_player_history(
         self,
@@ -268,32 +307,44 @@ class GameInsightsMixin:
         )
 
         results: list[dict[str, Any]] = []
-        for game in games:
-            total = int(game.current_round or 0)
-            h = int(game.human_score or 0)
-            a = int(game.ai_score or 0)
-            ai_correct = await db.scalar(
-                select(func.count())
-                .select_from(GameRoundRecord)
-                .where(
-                    and_(
-                        GameRoundRecord.game_id == game.id,
-                        GameRoundRecord.completed.is_(True),
-                        GameRoundRecord.ai_correct.is_(True),
+        for game_row in games:
+            game = record_to_dict(game_row)
+            is_redesigned = self._is_redesigned_game(game)
+            total = self._rounds_played(game) if is_redesigned else int(game_row.current_round or 0)
+            h = int(game_row.human_score or 0)
+            a = int(game_row.ai_score or 0)
+            state = self._ensure_redesign_state(game.get("model_state") or {})
+            ai_correct = int(state.get("total_matches") or 0)
+            if not is_redesigned:
+                ai_correct = int(
+                    await db.scalar(
+                        select(func.count())
+                        .select_from(GameRoundRecord)
+                        .where(
+                            and_(
+                                GameRoundRecord.game_id == game_row.id,
+                                GameRoundRecord.completed.is_(True),
+                                GameRoundRecord.ai_correct.is_(True),
+                            )
+                        )
                     )
+                    or 0
                 )
-            )
             results.append(
                 {
-                    "game_id": game.id,
+                    "game_id": game_row.id,
+                    "schema_version": int(game.get("schema_version") or self.LEGACY_SCHEMA_VERSION),
                     "player_name": player_name,
-                    "category": normalize_category(game.category),
+                    "category": normalize_category(game_row.category),
                     "human_score": h,
                     "ai_score": a,
                     "score_difference": h - a,
                     "rounds_played": total,
                     "ai_accuracy": (int(ai_correct or 0) / total) if total else 0,
-                    "created_at": game.created_at,
+                    "rounds_to_complete": total if is_redesigned else 0,
+                    "longest_match_streak": int(state.get("longest_match_streak") or 0) if is_redesigned else 0,
+                    "match_rate": (int(state.get("total_matches") or 0) / total) if is_redesigned and total else 0.0,
+                    "created_at": game_row.created_at,
                 }
             )
         return results

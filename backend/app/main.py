@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"
 FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
+MIN_MOVIE_VOTE_COUNT = 1000
 
 app = FastAPI(title="Decidio Prototype (Postgres)")
 
@@ -89,16 +90,17 @@ async def list_products(
 ):
     """List products with optional filtering."""
     filters = []
+    normalized_category: str | None = None
     if q:
         filters.append(ProductRecord.data["title"].as_string().ilike(f"%{q}%"))
     if vendor:
         filters.append(ProductRecord.data["vendor"].as_string().ilike(f"%{vendor}%"))
     if category:
         try:
-            normalized = normalize_category(category)
+            normalized_category = normalize_category(category)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        filters.append(ProductRecord.category == normalized)
+        filters.append(ProductRecord.category == normalized_category)
     if price_min is not None:
         filters.append(cast(ProductRecord.data["price_min"].as_string(), Float) >= price_min)
     if price_max is not None:
@@ -109,12 +111,27 @@ async def list_products(
         stmt = stmt.where(and_(*filters))
     result = await db.execute(stmt)
     products = [record_to_dict(row) for row in result.scalars().all()]
+    products = _filter_visible_products(products, normalized_category or "")
     return [ProductOut.from_record(Product(**p)) for p in products]
 
 
 def _normalize_text(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", " ", text.lower())
     return cleaned.strip()
+
+
+def _filter_visible_products(products: list[dict], category: str) -> list[dict]:
+    if category != "movies":
+        return products
+    visible: list[dict] = []
+    for product in products:
+        try:
+            vote_count = int(product.get("vote_count") or 0)
+        except (TypeError, ValueError):
+            vote_count = 0
+        if vote_count >= MIN_MOVIE_VOTE_COUNT:
+            visible.append(product)
+    return visible
 
 
 @app.get("/api/products/search", response_model=list[ProductOut])
@@ -143,7 +160,7 @@ async def search_products(
     pool_limit = max(40, min(200, int(limit) * 8))
     stmt = stmt.limit(pool_limit)
     rows = (await db.execute(stmt)).scalars().all()
-    products = [record_to_dict(row) for row in rows]
+    products = _filter_visible_products([record_to_dict(row) for row in rows], normalized)
 
     if not fuzzy:
         return [ProductOut.from_record(Product(**p)) for p in products[:limit]]

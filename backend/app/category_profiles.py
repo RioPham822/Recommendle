@@ -1,4 +1,4 @@
-"""Category profile metadata and feature token/humanization helpers."""
+﻿"""Category profile metadata and feature token/humanization helpers."""
 
 from __future__ import annotations
 
@@ -19,9 +19,12 @@ class CategoryProfile:
     vendor_label: str
     mode_caption: str
     onboarding_action: str
+    onboarding_pool_size: int
     top_recommendations_label: str
     hidden_gems_label: str
     hidden_gems_subtitle: str
+    round_intro_title: str
+    round_intro_body: str
     round_mode: str
     redundant_tokens: tuple[str, ...]
     categorical_fields: tuple[str, ...]
@@ -39,11 +42,14 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         item_singular="pen",
         item_plural="pens",
         vendor_label="Brand",
-        mode_caption="Visual mode prioritizes product imagery. Feature mode emphasizes vendor, price, and tag signals.",
-        onboarding_action="Choose 10 pens from a pool of 50 to build your taste profile.",
+        mode_caption="Pictures highlights the full pen photography. Specifications highlights brand, price, nib options, and material clues.",
+        onboarding_action="Choose 1 to 10 pens from a pool of 100 to build your taste profile.",
+        onboarding_pool_size=100,
         top_recommendations_label="AI's Top 5 Picks for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
         hidden_gems_subtitle="Pens You Didn't Know You'd Love",
+        round_intro_title="Now the AI starts reading your taste.",
+        round_intro_body="Pick your favorite pen each round. If the AI includes it in its top 5 predictions, that is a Preference Match.",
         round_mode="classic",
         redundant_tokens=(
             "fountain pens",
@@ -79,12 +85,15 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         item_singular="movie",
         item_plural="movies",
         vendor_label="Studio",
-        mode_caption="Visual mode prioritizes posters. Feature mode emphasizes genre, studio, runtime, and rating signals.",
-        onboarding_action="Choose 10 movies from a pool of 50 to build your taste profile.",
+        mode_caption="Pictures highlights posters and key art. Specifications highlights genre, studio, runtime, language, and rating clues.",
+        onboarding_action="Choose 1 to 10 movies from a pool of 100 to build your taste profile.",
+        onboarding_pool_size=100,
         top_recommendations_label="AI's Top 5 Movies for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
         hidden_gems_subtitle="Movies You Didn't Know You'd Love",
-        round_mode="duel",
+        round_intro_title="Now the AI starts reading your taste.",
+        round_intro_body="Pick your favorite movie each round. If the AI includes it in its top 5 predictions, that is a Preference Match.",
+        round_mode="classic",
         redundant_tokens=("movie", "movies", "film", "films"),
         categorical_fields=(
             "vendor",
@@ -116,13 +125,16 @@ _CATEGORY_PROFILES: dict[str, CategoryProfile] = {
         item_plural="games",
         vendor_label="Studio",
         mode_caption=(
-            "Visual mode prioritizes cover art. Feature mode emphasizes genre, platform, studio, release year, "
+            "Pictures highlights cover art. Specifications highlights genre, platform, studio, release year, "
             "and rating signals."
         ),
-        onboarding_action="Choose 10 games from a pool of 50 to build your taste profile.",
+        onboarding_action="Choose 1 to 10 games from a pool of 100 to build your taste profile.",
+        onboarding_pool_size=100,
         top_recommendations_label="AI's Top 5 Games for You",
         hidden_gems_label="Hidden Gems - Patterns You Might Not Have Noticed",
         hidden_gems_subtitle="Games You Didn't Know You'd Love",
+        round_intro_title="Now the AI starts reading your taste.",
+        round_intro_body="Pick your favorite game each round. If the AI includes it in its top 5 predictions, that is a Preference Match.",
         round_mode="classic",
         redundant_tokens=("game", "games", "video game", "video games"),
         categorical_fields=("vendor", "decade_bucket", "game_status"),
@@ -177,6 +189,8 @@ def category_copy(category: str | None) -> dict[str, str]:
         "vendor_label": profile.vendor_label,
         "mode_caption": profile.mode_caption,
         "onboarding_action": profile.onboarding_action,
+        "round_intro_title": profile.round_intro_title,
+        "round_intro_body": profile.round_intro_body,
         "top_recommendations_label": profile.top_recommendations_label,
         "hidden_gems_label": profile.hidden_gems_label,
         "hidden_gems_subtitle": profile.hidden_gems_subtitle,
@@ -374,7 +388,8 @@ def humanize_feature(raw: str) -> str | None:
     value = "::".join(parts[4:])
 
     value_text = value.replace("|", " ").replace("_", " ").strip().title()
-    if value_text.lower() in {t.lower() for t in profile.redundant_tokens}:
+    hidden_tokens = {t.lower() for t in (*profile.redundant_tokens, *profile.hidden_tag_tokens)}
+    if value_text.lower() in hidden_tokens:
         return None
 
     if kind == "cat":
@@ -438,3 +453,4 @@ def numeric_preference_label(raw: str, weight: float) -> str:
     if field == "hypes":
         return "Trending Titles" if positive else "Less Trending Titles"
     return f"{field.replace('_', ' ').title()} Preference"
+

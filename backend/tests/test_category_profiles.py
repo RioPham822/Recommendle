@@ -2,8 +2,10 @@ import unittest
 
 from app.category_profiles import (
     extract_feature_tokens,
+    get_category_profile,
     humanize_feature,
     normalize_category,
+    supported_categories,
 )
 
 
@@ -58,6 +60,11 @@ class CategoryProfileTests(unittest.TestCase):
 
     def test_normalize_category_default(self):
         self.assertEqual(normalize_category(None), "fountain_pens")
+
+    def test_all_supported_categories_use_100_item_onboarding_pool(self):
+        for category in supported_categories():
+            profile = get_category_profile(category)
+            self.assertEqual(profile.onboarding_pool_size, 100)
 
 
 if __name__ == "__main__":

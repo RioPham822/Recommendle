@@ -24,6 +24,8 @@ backend/.env.*
 .claude/
 .codex/
 .github/
+output/
+.playwright-mcp/
 
 # ── IDE / Editor ──
 .vscode/
@@ -67,6 +69,10 @@ npm-debug.log*
 nul
 
 backend/backups/
+
+# ── Test files ──
+test_hover_preview.mjs
+final-summary-hover-test
 backend/data/tmdb_ingest_checkpoint.json
 backend/data/igdb_ingest_checkpoint.json
 backend/data/movies_export.json

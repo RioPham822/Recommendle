@@ -64,12 +64,12 @@ export async function changePassword(userId, oldPassword, newPassword, sessionTo
 }
 
 export async function logoutUser(userId, sessionToken) {
-  return request('/api/auth/logout', {
+  const params = new URLSearchParams({
+    user_id: userId,
+    session_token: sessionToken,
+  });
+  return request(`/api/auth/logout?${params.toString()}`, {
     method: 'POST',
-    body: JSON.stringify({
-      user_id: userId,
-      session_token: sessionToken,
-    }),
   });
 }
 
@@ -145,6 +145,13 @@ export async function submitRoundPick(gameId, roundNumber, productId, lessLikeId
   return request(`/api/game/${gameId}/round/${roundNumber}/pick`, {
     method: 'POST',
     body: JSON.stringify({ product_id: productId, less_like_ids: lessLikeIds }),
+  });
+}
+
+export async function updatePreferences(gameId, activePreferenceIds = []) {
+  return request(`/api/game/${gameId}/preferences`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active_preference_ids: activePreferenceIds }),
   });
 }
 

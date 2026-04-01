@@ -27,7 +27,7 @@ Live website: https://recommendle-frontend.onrender.com
   - user accounts with independent play history
 - Includes local maintenance utilities in `backend/test.py`:
   - database summaries and cleanup commands
-  - movie export to JSON via `export-movies-json`
+  - movie export to JSON or Excel-friendly spreadsheet via `export-movies-json` / `export-movies-excel`
 
 See [FEATURES_GUIDE.md](docs/FEATURES_GUIDE.md) for detailed usage.
 Dataset extension guide: [ADDING_DATASETS.md](docs/ADDING_DATASETS.md)
@@ -219,6 +219,7 @@ Run these from repo root:
 | Ingest games from IGDB | `docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates 5000` | Optional games category ingest |
 | Backend DB utility (`backend/test.py`) | `docker compose exec backend python test.py summary` | Quick DB summary and maintenance commands |
 | Export movies to JSON | `docker compose exec backend python test.py export-movies-json --output data/movies_export.json` | Writes a JSON export of movie records |
+| Export movies to Excel | `docker compose exec backend python test.py export-movies-excel --output data/movies_export.csv` | Writes an Excel-friendly CSV with every discovered movie field as a column |
 | Category migration | `docker compose exec backend python -m scripts.migrate_multicategory_schema` | No-op placeholder in Postgres mode |
 | Evaluate AI on completed games | `docker compose exec backend python -m scripts.evaluate_pbcf` | Prints accuracy/score metrics from completed games |
 
@@ -231,6 +232,7 @@ Warning:
 - `docker compose exec backend python test.py clear-games`
 - `docker compose exec backend python test.py clear-products --category movies`
 - `docker compose exec backend python test.py export-movies-json --output data/movies_export.json`
+- `docker compose exec backend python test.py export-movies-excel --output data/movies_export.csv`
 
 ## Ingestion Strategy (TMDB + IGDB)
 This section explains how candidate items are fetched before upsert.

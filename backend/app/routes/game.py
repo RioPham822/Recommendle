@@ -23,6 +23,8 @@ from ..schemas_game import (
     OnboardingSubmit,
     OnboardingSubmitOut,
     PlayerGameEntry,
+    PreferenceUpdateOut,
+    PreferenceUpdateSubmit,
     ResumableGameOut,
     RoundPickSubmit,
     RoundResultOut,
@@ -223,6 +225,24 @@ async def submit_seed_preferences(
             dislike_product_ids=payload.dislike_product_ids,
         )
         return SeedPreferencesOut(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/{game_id}/preferences", response_model=PreferenceUpdateOut)
+async def update_preferences(
+    game_id: str,
+    payload: PreferenceUpdateSubmit,
+    db: AsyncSession = Depends(get_db),
+):
+    """Rebuild the active preference deck and refresh the current round if needed."""
+    try:
+        result = await game_service.update_preferences(
+            db,
+            game_id,
+            active_preference_ids=payload.active_preference_ids,
+        )
+        return PreferenceUpdateOut(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

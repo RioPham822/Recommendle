@@ -91,7 +91,6 @@ class GameRecord(Base):
     """Stored game session state and score progression."""
 
     __tablename__ = "games"
-    __table_args__ = (UniqueConstraint("player_name", "category", name="uq_game_player_category"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     schema_version: Mapped[int] = mapped_column(Integer, default=2)
@@ -211,7 +210,9 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_games_category_player_created ON games(category, player_name, created_at DESC)"
             )
         )
-        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_game_player_category ON games(player_name, category)"))
+        await conn.execute(text("ALTER TABLE games DROP CONSTRAINT IF EXISTS uq_game_player_category"))
+        await conn.execute(text("DROP INDEX IF EXISTS uq_game_player_category"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_player_category ON games(player_name, category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_category ON products(category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_source_id ON products((data->>'source_id'))"))
         await conn.execute(
