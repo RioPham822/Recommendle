@@ -382,7 +382,7 @@ async def delete_user_account(
 
     await db.execute(delete(UserRecord).where(UserRecord.id == user_id))
     await db.commit()
-    await recommender.refresh(db)
+    recommender.invalidate_ratings()
     return {
         "success": True,
         "deleted_game_count": len(game_ids),
@@ -413,7 +413,7 @@ async def clear_user_progress(
         await db.execute(delete(GameRecord).where(GameRecord.id.in_(game_ids)))
 
     await db.commit()
-    await recommender.refresh(db)
+    recommender.invalidate_ratings()
     return {
         "success": True,
         "cleared_game_count": len(game_ids),
