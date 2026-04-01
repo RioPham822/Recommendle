@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     tmdb_api_key: str = ""
     igdb_client_id: str = ""
     igdb_client_secret: str = ""
+    admin_username: str = "admin"
+    admin_password: str = "password"
+    admin_display_name: str = "Administrator"
 
 
 settings = Settings()
@@ -79,6 +82,7 @@ class UserRecord(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     username: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="player", index=True)
     password_hash: Mapped[str] = mapped_column(String(300), nullable=False)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     games: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -150,6 +154,16 @@ class PrefixRatingRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
+class AppConfigRecord(Base):
+    """Key/value application configuration editable by admin users."""
+
+    __tablename__ = "app_config"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
 def record_to_dict(record: Any) -> dict[str, Any]:
     """Normalize ORM row into existing dict shape expected by services."""
     if isinstance(record, ProductRecord):
@@ -201,6 +215,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'player'"))
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS mode VARCHAR(20) DEFAULT 'classic'"))
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_games_category_status_created ON games(category, status, created_at DESC)")
@@ -213,6 +228,7 @@ async def init_db() -> None:
         await conn.execute(text("ALTER TABLE games DROP CONSTRAINT IF EXISTS uq_game_player_category"))
         await conn.execute(text("DROP INDEX IF EXISTS uq_game_player_category"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_player_category ON games(player_name, category)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role ON users(role)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_category ON products(category)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_source_id ON products((data->>'source_id'))"))
         await conn.execute(

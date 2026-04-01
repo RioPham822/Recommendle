@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
@@ -7,6 +8,8 @@ import './AccountMenu.css';
 export default function AccountMenu({
   displayName,
   username,
+  isAdmin,
+  onOpenAdmin,
   onLogout,
   loading,
 }) {
@@ -56,6 +59,20 @@ export default function AccountMenu({
             <p className="account-menu__name">{displayName}</p>
             <p className="account-menu__username">@{username}</p>
           </div>
+          {isAdmin && (
+            <button
+              type="button"
+              className="account-menu__item"
+              onClick={() => {
+                setIsOpen(false);
+                onOpenAdmin();
+              }}
+              disabled={loading}
+            >
+              <AdminPanelSettingsRoundedIcon fontSize="small" />
+              <span>Admin workspace</span>
+            </button>
+          )}
           <button
             type="button"
             className="account-menu__item"

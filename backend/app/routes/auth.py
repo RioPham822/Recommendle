@@ -78,6 +78,7 @@ async def get_user(
     return UserOut(
         id=user.get("_id"),
         username=user.get("username"),
+        role=user.get("role", "player"),
         display_name=user.get("display_name"),
         created_at=user.get("created_at"),
     )

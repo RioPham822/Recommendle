@@ -1,9 +1,11 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8015').replace(/\/$/, '');
 
 async function request(path, options = {}) {
+  const authHeaders = getAuthHeaders();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
       ...(options.headers || {}),
     },
     ...options,
@@ -48,6 +50,100 @@ export async function loginUser(username, password) {
 
 export async function getUser(userId) {
   return request(`/api/auth/user/${userId}`);
+}
+
+export async function getAdminMe() {
+  return request('/api/admin/me');
+}
+
+export async function listAdminUsers() {
+  return request('/api/admin/users');
+}
+
+export async function getAdminUserMlStats(userId) {
+  return request(`/api/admin/users/${userId}/ml-stats`);
+}
+
+export async function deleteAdminUser(userId) {
+  const response = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // Ignore JSON parsing errors; use status text.
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+export async function getAdminMlConfig() {
+  return request('/api/admin/ml-config');
+}
+
+export async function updateAdminMlConfig(values) {
+  return request('/api/admin/ml-config', {
+    method: 'PATCH',
+    body: JSON.stringify({ values }),
+  });
+}
+
+export async function listAdminCategories() {
+  return request('/api/admin/categories');
+}
+
+export async function listAdminProducts({
+  category,
+  search = '',
+  filters = {},
+  limit = 100,
+  offset = 0,
+  sortField = 'title',
+  sortDir = 'asc',
+}) {
+  const params = new URLSearchParams({
+    category,
+    limit: String(limit),
+    offset: String(offset),
+    sort_field: sortField,
+    sort_dir: sortDir,
+  });
+  if (search) params.set('search', search);
+  if (filters && Object.keys(filters).length > 0) params.set('filters', JSON.stringify(filters));
+  return request(`/api/admin/products?${params.toString()}`);
+}
+
+export async function exportAdminProducts({ category, search = '', filters = {} }) {
+  const params = new URLSearchParams({ category });
+  if (search) params.set('search', search);
+  if (filters && Object.keys(filters).length > 0) params.set('filters', JSON.stringify(filters));
+  const response = await fetch(`${API_BASE}/api/admin/products/export?${params.toString()}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // Ignore JSON parsing errors; use status text.
+    }
+    throw new Error(detail);
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${category}-products-export.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export async function changePassword(userId, oldPassword, newPassword, sessionToken) {
@@ -211,6 +307,23 @@ export function getUsername() {
   return localStorage.getItem('username');
 }
 
+export function getUserRole() {
+  return localStorage.getItem('userRole');
+}
+
+export function getAuthHeaders() {
+  const token = getAuthToken();
+  const userId = getUserId();
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (userId) {
+    headers['X-User-Id'] = userId;
+  }
+  return headers;
+}
+
 export function isTokenExpired() {
   const expiry = localStorage.getItem('tokenExpiry');
   if (!expiry) return true;
@@ -222,5 +335,6 @@ export function clearAuthData() {
   localStorage.removeItem('sessionToken');
   localStorage.removeItem('displayName');
   localStorage.removeItem('username');
+  localStorage.removeItem('userRole');
   localStorage.removeItem('tokenExpiry');
 }

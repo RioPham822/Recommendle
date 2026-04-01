@@ -72,11 +72,13 @@ export default function AuthScreen({
       localStorage.setItem('sessionToken', data.session_token);
       localStorage.setItem('displayName', data.display_name);
       localStorage.setItem('username', data.username);
+      localStorage.setItem('userRole', data.role || 'player');
       localStorage.setItem('tokenExpiry', data.expires_at);
 
       onLoginSuccess({
         userId: data.user_id,
         username: data.username,
+        role: data.role || 'player',
         displayName: data.display_name,
         sessionToken: data.session_token,
       });

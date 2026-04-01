@@ -67,6 +67,7 @@ class User(BaseDocModel):
     """User model used by API/domain layer."""
 
     username: str = Field(..., index=True, unique=True)
+    role: str = "player"
     password_hash: str
     display_name: str
     games: list[str] = Field(default_factory=list)
@@ -114,13 +115,20 @@ class UserOut(BaseModel):
 
     id: str
     username: str
+    role: str
     display_name: str
     created_at: datetime
 
     @classmethod
     def from_record(cls, user: User) -> "UserOut":
         """Build API DTO from internal user model."""
-        return cls(id=str(user.id), username=user.username, display_name=user.display_name, created_at=user.created_at)
+        return cls(
+            id=str(user.id),
+            username=user.username,
+            role=user.role,
+            display_name=user.display_name,
+            created_at=user.created_at,
+        )
 
 
 class UserCreate(BaseModel):

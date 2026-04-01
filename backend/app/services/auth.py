@@ -9,10 +9,11 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import UserRecord, new_id
+from ..db import UserRecord, get_db, new_id, settings
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,22 @@ def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def active_session_tokens(tokens: list[dict] | None) -> list[dict]:
+    """Return only unexpired session token entries."""
+    now = datetime.utcnow()
+    active: list[dict] = []
+    for token in tokens or []:
+        expires_at = token.get("expires_at")
+        if not expires_at:
+            continue
+        try:
+            if datetime.fromisoformat(str(expires_at)) > now:
+                active.append(token)
+        except ValueError:
+            continue
+    return active
+
+
 class AuthService:
     """User registration/login/session management service."""
 
@@ -63,9 +80,13 @@ class AuthService:
         if existing_user:
             raise ValueError("Username already exists")
 
+        admin_count = await db.scalar(select(func.count()).select_from(UserRecord).where(UserRecord.role == "admin"))
+        role = "admin" if not admin_count else "player"
+
         user = UserRecord(
             id=new_id(),
             username=username,
+            role=role,
             password_hash=hash_password(password),
             display_name=display_name or username,
             games=[],
@@ -80,6 +101,7 @@ class AuthService:
         return {
             "_id": user.id,
             "username": user.username,
+            "role": user.role,
             "display_name": user.display_name,
             "created_at": user.created_at,
             "session_tokens": user.session_tokens,
@@ -116,6 +138,7 @@ class AuthService:
         return {
             "user_id": user.id,
             "username": user.username,
+            "role": user.role,
             "display_name": user.display_name,
             "session_token": token,
             "expires_at": expiry.isoformat(),
@@ -126,24 +149,21 @@ class AuthService:
         db: AsyncSession,
         user_id: str,
         token: str,
-    ) -> bool:
-        """Return True when a user token exists and is not expired."""
+    ) -> Optional[UserRecord]:
+        """Return user record when a token exists and is not expired."""
         user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
         if not user:
-            return False
-        now = datetime.utcnow()
-        for session_token in user.session_tokens or []:
+            return None
+        valid_tokens = active_session_tokens(user.session_tokens)
+        if len(valid_tokens) != len(user.session_tokens or []):
+            user.session_tokens = valid_tokens
+            user.updated_at = datetime.utcnow()
+            await db.commit()
+        for session_token in valid_tokens:
             if session_token.get("token") != token:
                 continue
-            expires_at = session_token.get("expires_at")
-            if not expires_at:
-                continue
-            try:
-                if datetime.fromisoformat(str(expires_at)) > now:
-                    return True
-            except ValueError:
-                continue
-        return False
+            return user
+        return None
 
     @staticmethod
     async def logout_user(
@@ -173,6 +193,7 @@ class AuthService:
         return {
             "_id": user.id,
             "username": user.username,
+            "role": user.role,
             "display_name": user.display_name,
             "created_at": user.created_at,
         }
@@ -199,6 +220,120 @@ class AuthService:
         await db.commit()
         logger.info(f"Password changed for user: {user.username}")
         return True
+
+    @staticmethod
+    async def list_users(db: AsyncSession) -> list[dict]:
+        """Return all users for admin management."""
+        rows = (await db.execute(select(UserRecord).order_by(UserRecord.created_at.desc()))).scalars().all()
+        changed = False
+        for user in rows:
+            valid_tokens = active_session_tokens(user.session_tokens)
+            if len(valid_tokens) != len(user.session_tokens or []):
+                user.session_tokens = valid_tokens
+                user.updated_at = datetime.utcnow()
+                changed = True
+        if changed:
+            await db.commit()
+        return [
+            {
+                "_id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "display_name": user.display_name,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at,
+                "active_sessions": len(user.session_tokens or []),
+            }
+            for user in rows
+        ]
+
+    @staticmethod
+    async def update_user_role(db: AsyncSession, user_id: str, role: str) -> dict:
+        """Promote/demote a user between supported roles."""
+        normalized_role = role.strip().lower()
+        if normalized_role not in {"player", "admin"}:
+            raise ValueError("Role must be either 'player' or 'admin'")
+        user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
+        if not user:
+            raise ValueError("User not found")
+        user.role = normalized_role
+        user.updated_at = datetime.utcnow()
+        await db.commit()
+        return {
+            "_id": user.id,
+            "username": user.username,
+            "role": user.role,
+            "display_name": user.display_name,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+        }
+
+    @staticmethod
+    async def revoke_user_sessions(db: AsyncSession, user_id: str) -> bool:
+        """Invalidate all active sessions for one user."""
+        user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
+        if not user:
+            return False
+        user.session_tokens = []
+        user.updated_at = datetime.utcnow()
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def ensure_bootstrap_admin(db: AsyncSession) -> None:
+        """Create a configured admin account on startup when requested."""
+        username = settings.admin_username.strip().lower()
+        password = settings.admin_password
+        if not username or not password:
+            return
+        existing = await db.scalar(select(UserRecord).where(UserRecord.username == username))
+        if existing:
+            if existing.role != "admin":
+                existing.role = "admin"
+                existing.updated_at = datetime.utcnow()
+                await db.commit()
+            return
+        user = UserRecord(
+            id=new_id(),
+            username=username,
+            role="admin",
+            password_hash=hash_password(password),
+            display_name=settings.admin_display_name.strip() or "Administrator",
+            games=[],
+            session_tokens=[],
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        await db.commit()
+        logger.info("Bootstrap admin account created for %s", username)
+
+
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None),
+) -> UserRecord:
+    """Resolve the authenticated user from request headers."""
+    if not x_user_id or not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1].strip()
+    user = await auth_service.verify_token(db, x_user_id, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return user
+
+
+async def require_admin(
+    db: AsyncSession = Depends(get_db),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None),
+) -> UserRecord:
+    """Resolve the authenticated admin user from request headers."""
+    user = await get_current_user(db, x_user_id=x_user_id, authorization=authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
 auth_service = AuthService()

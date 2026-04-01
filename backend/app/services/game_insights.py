@@ -231,7 +231,7 @@ class GameInsightsMixin:
         limit: int = 10,
         category: str = "fountain_pens",
     ) -> list[dict[str, Any]]:
-        """Return top completed games for a category sorted by performance."""
+        """Return top players for a category using each player's best completed game."""
         normalized_category = normalize_category(category)
         games = (
             (
@@ -248,18 +248,65 @@ class GameInsightsMixin:
                         GameRecord.current_round.asc(),
                         GameRecord.updated_at.asc(),
                     )
-                    .limit(int(limit))
                 )
             )
             .scalars()
             .all()
         )
-        entries: list[dict[str, Any]] = []
-        for index, game_row in enumerate(games):
+        best_by_player: dict[str, dict[str, Any]] = {}
+        for game_row in games:
             game = record_to_dict(game_row)
+            player_name = str(game.get("player_name") or "").strip()
+            if not player_name:
+                continue
             state = self._ensure_redesign_state(game.get("model_state") or {})
             rounds_completed = self._rounds_played(game)
             total_matches = int(state.get("total_matches") or game.get("human_score") or 0)
+            candidate = {
+                "schema_version": int(game.get("schema_version") or self.LEGACY_SCHEMA_VERSION),
+                "player_name": player_name,
+                "category": normalize_category(game["category"]),
+                "human_score": int(game.get("human_score") or 0),
+                "ai_score": int(game.get("ai_score") or 0),
+                "score_difference": int((game.get("human_score") or 0) - (game.get("ai_score") or 0)),
+                "rounds_completed": rounds_completed,
+                "rounds_to_complete": rounds_completed,
+                "longest_match_streak": int(state.get("longest_match_streak") or 0),
+                "match_rate": (total_matches / rounds_completed) if rounds_completed else 0.0,
+                "created_at": game["created_at"],
+                "updated_at": game.get("updated_at"),
+            }
+            current = best_by_player.get(player_name)
+            if current is None:
+                best_by_player[player_name] = candidate
+                continue
+            candidate_key = (
+                candidate["rounds_to_complete"],
+                -candidate["match_rate"],
+                -(candidate["longest_match_streak"] or 0),
+                candidate["updated_at"] or candidate["created_at"],
+            )
+            current_key = (
+                current["rounds_to_complete"],
+                -current["match_rate"],
+                -(current["longest_match_streak"] or 0),
+                current["updated_at"] or current["created_at"],
+            )
+            if candidate_key < current_key:
+                best_by_player[player_name] = candidate
+
+        ranked_games = sorted(
+            best_by_player.values(),
+            key=lambda entry: (
+                entry["rounds_to_complete"],
+                -entry["match_rate"],
+                -(entry["longest_match_streak"] or 0),
+                entry["updated_at"] or entry["created_at"],
+            ),
+        )[: int(limit)]
+
+        entries: list[dict[str, Any]] = []
+        for index, game in enumerate(ranked_games):
             entries.append(
                 {
                     "rank": index + 1,
@@ -269,10 +316,10 @@ class GameInsightsMixin:
                     "human_score": int(game.get("human_score") or 0),
                     "ai_score": int(game.get("ai_score") or 0),
                     "score_difference": int((game.get("human_score") or 0) - (game.get("ai_score") or 0)),
-                    "rounds_completed": rounds_completed,
-                    "rounds_to_complete": rounds_completed,
-                    "longest_match_streak": int(state.get("longest_match_streak") or 0),
-                    "match_rate": (total_matches / rounds_completed) if rounds_completed else 0.0,
+                    "rounds_completed": int(game.get("rounds_completed") or 0),
+                    "rounds_to_complete": int(game.get("rounds_to_complete") or 0),
+                    "longest_match_streak": int(game.get("longest_match_streak") or 0),
+                    "match_rate": float(game.get("match_rate") or 0.0),
                     "created_at": game["created_at"],
                 }
             )

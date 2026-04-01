@@ -15,6 +15,7 @@ from ..category_profiles import (
     is_numeric_feature_key,
 )
 from ..models import Product
+from ..services.ml_config import get_ml_config
 
 
 @dataclass
@@ -95,63 +96,76 @@ class PrefixCFModel:
 
     def init_state(self) -> dict:
         """Create a fresh mutable state for one player/game."""
+        config = get_ml_config()
         return {
             "user_vec": [0.0] * len(self.feature_space.feature_index),
             "bias": 0.0,
             "count": 0,
-            "exception_weight": 0.35,
-            "decay": 0.85,
+            "exception_weight": float(config.get("exception_weight", 0.35)),
+            "decay": float(config.get("decay", 0.85)),
         }
 
     def update_with_selection(self, state: dict, product: Product, is_exception: bool) -> None:
         """Update user vector with a selected product."""
+        config = get_ml_config()
         vec = self.feature_space.vectorize(product)
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
-        decay = float(state.get("decay", 0.85))
-        weight = float(state.get("exception_weight", 0.35) if is_exception else 1.0)
+        decay = float(config.get("decay", state.get("decay", 0.85)))
+        weight = float(
+            config.get("exception_weight", state.get("exception_weight", 0.35))
+            if is_exception
+            else config.get("selection_weight", 1.0)
+        )
         updated = decay * user_vec + weight * vec
         state["user_vec"] = updated.tolist()
         state["count"] = int(state.get("count", 0)) + 1
 
     def update_with_negative_feedback(self, state: dict, product: Product, weight: float = 0.6) -> None:
         """Apply negative feedback to reduce affinity for an item and its features."""
+        config = get_ml_config()
         vec = self.feature_space.vectorize(product)
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
-        decay = float(state.get("decay", 0.85))
-        updated = decay * user_vec - weight * vec
+        decay = float(config.get("decay", state.get("decay", 0.85)))
+        applied_weight = float(config.get("negative_weight", weight))
+        updated = decay * user_vec - applied_weight * vec
         state["user_vec"] = updated.tolist()
         state["neg_count"] = int(state.get("neg_count", 0)) + 1
 
     def update_with_seed(self, state: dict, product: Product, weight: float = 0.45) -> None:
         """Seed initial preference vector without incrementing selection count."""
+        config = get_ml_config()
         vec = self.feature_space.vectorize(product)
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
-        updated = user_vec + weight * vec
+        applied_weight = float(config.get("seed_weight", weight))
+        updated = user_vec + applied_weight * vec
         state["user_vec"] = updated.tolist()
 
     def update_with_prefix_rating(self, state: dict, rating: int) -> None:
         """Adjust model bias using explicit onboarding rating feedback."""
+        config = get_ml_config()
         predicted = self.predict_prefix_rating(state)
         error = float(rating) - predicted
-        state["bias"] = float(state.get("bias", 0.0)) + 0.25 * error
+        state["bias"] = float(state.get("bias", 0.0)) + float(config.get("bias_learning_rate", 0.25)) * error
 
     def predict_prefix_rating(self, state: dict) -> float:
         """Predict 1..5 rating from current latent user state."""
+        config = get_ml_config()
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         bias = float(state.get("bias", 0.0))
         norm = float(np.linalg.norm(user_vec))
-        base = 3.0 + 1.5 * math.tanh(norm / 3.0) + bias
+        base = 3.0 + 1.5 * math.tanh(norm / float(config.get("score_norm_divisor", 3.0))) + bias
         return float(min(5.0, max(1.0, base)))
 
     def score_item(self, state: dict, item_vec: np.ndarray) -> float:
         """Score one candidate item vector against current user state."""
+        config = get_ml_config()
         user_vec = np.array(state.get("user_vec", []), dtype=np.float32)
         bias = float(state.get("bias", 0.0))
         denom = np.linalg.norm(user_vec) * np.linalg.norm(item_vec)
         similarity = 0.0
         if denom > 0:
             similarity = float(np.dot(user_vec, item_vec) / denom)
-        score = 3.0 + 1.7 * similarity + bias
+        score = 3.0 + float(config.get("score_similarity_weight", 1.7)) * similarity + bias
         return float(min(5.0, max(1.0, score)))
 
     def coherence_score(self, item_vecs: list[np.ndarray]) -> float:

@@ -5,6 +5,7 @@ import logo from './assets/logo.svg';
 import logoDark from './assets/logo-dark.svg';
 import AuthScreen from './components/AuthScreen';
 import AccountMenu from './components/AccountMenu';
+import AdminScreen from './components/AdminScreen';
 import BetaSeedScreen from './components/BetaSeedScreen';
 import BrainModePanel from './components/BrainModePanel';
 import FinalSummary from './components/FinalSummary';
@@ -22,6 +23,7 @@ import {
   getLeaderboard,
   getOnboarding,
   getResumeState,
+  getUserRole,
   getUserId,
   logoutUser,
   refreshRound,
@@ -40,6 +42,7 @@ const VIEW = {
   ROUND: 'round',
   RESULT: 'result',
   FINAL: 'final',
+  ADMIN: 'admin',
 };
 
 const THEME_STORAGE_KEY = 'recommendle-theme';
@@ -61,6 +64,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('sessionToken'));
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('displayName') || '');
   const [username, setUsername] = useState(() => localStorage.getItem('username') || '');
+  const [userRole, setUserRole] = useState(() => getUserRole() || 'player');
   const [view, setView] = useState(VIEW.WELCOME);
   const [playerName, setPlayerName] = useState('');
   const [categories, setCategories] = useState([]);
@@ -209,6 +213,7 @@ export default function App() {
     setIsAuthenticated(true);
     setDisplayName(authData.displayName);
     setUsername(authData.username);
+    setUserRole(authData.role || 'player');
     setPlayerName(authData.displayName);
     setBusy((previous) => ({ ...previous, auth: false }));
   }
@@ -227,6 +232,7 @@ export default function App() {
       setIsAuthenticated(false);
       setDisplayName('');
       setUsername('');
+      setUserRole('player');
       setPlayerName('');
       resetAll();
     }
@@ -550,6 +556,8 @@ export default function App() {
             <AccountMenu
               displayName={displayName}
               username={username}
+              isAdmin={userRole === 'admin'}
+              onOpenAdmin={() => setView(VIEW.ADMIN)}
               onLogout={handleLogout}
               loading={busy.auth}
             />
@@ -671,6 +679,10 @@ export default function App() {
             />
           )}
 
+          {view === VIEW.ADMIN && userRole === 'admin' && (
+            <AdminScreen onBack={() => setView(VIEW.WELCOME)} />
+          )}
+
           {viewingPlayer && (
             <PlayerStatsModal
               playerName={viewingPlayer}
@@ -683,4 +695,3 @@ export default function App() {
     </main>
   );
 }
-

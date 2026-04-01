@@ -25,8 +25,11 @@ from .db import (
     verify_connection,
 )
 from .models import Product, ProductOut, UserCreate, UserOut
+from .routes.admin import router as admin_router
 from .routes.auth import router as auth_router
 from .routes.game import router as game_router
+from .services.auth import auth_service
+from .services.ml_config import ml_config_service
 from .services.recommender import recommender
 from .services.schema_service import ensure_multicategory_compatibility
 
@@ -65,7 +68,9 @@ async def on_startup():
 
     db_gen = get_db()
     db = await anext(db_gen)
+    await auth_service.ensure_bootstrap_admin(db)
     await ensure_multicategory_compatibility(db)
+    await ml_config_service.ensure_loaded(db)
     await recommender.refresh(db)
     await db_gen.aclose()
     logger.info("Application startup completed")
@@ -192,6 +197,9 @@ app.include_router(game_router)
 
 # Include auth routes
 app.include_router(auth_router)
+
+# Include admin routes
+app.include_router(admin_router)
 
 
 # Mount frontend (production React build if available).
