@@ -586,6 +586,8 @@ export default function App() {
               logoSrc={activeLogo}
               playerName={playerName}
               setPlayerName={setPlayerName}
+              accountDisplayName={displayName}
+              isAuthenticated={isAuthenticated}
               categories={categories}
               selectedCategory={selectedCategory}
               setSelectedCategory={setSelectedCategory}

@@ -280,6 +280,19 @@ class AuthService:
         return True
 
     @staticmethod
+    async def clear_user_sessions(db: AsyncSession, user_id: str) -> int:
+        """Invalidate all currently active sessions for one user and return the count removed."""
+        user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
+        if not user:
+            raise ValueError("User not found")
+        valid_tokens = active_session_tokens(user.session_tokens)
+        removed_count = len(valid_tokens)
+        user.session_tokens = []
+        user.updated_at = datetime.utcnow()
+        await db.commit()
+        return removed_count
+
+    @staticmethod
     async def ensure_bootstrap_admin(db: AsyncSession) -> None:
         """Create a configured admin account on startup when requested."""
         username = settings.admin_username.strip().lower()
@@ -317,6 +330,23 @@ async def get_current_user(
     """Resolve the authenticated user from request headers."""
     if not x_user_id or not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1].strip()
+    user = await auth_service.verify_token(db, x_user_id, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return user
+
+
+async def get_optional_current_user(
+    db: AsyncSession = Depends(get_db),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None),
+) -> UserRecord | None:
+    """Resolve the authenticated user when auth headers are present, otherwise return None."""
+    if not x_user_id or not authorization:
+        return None
+    if not authorization.lower().startswith("bearer "):
+        return None
     token = authorization.split(" ", 1)[1].strip()
     user = await auth_service.verify_token(db, x_user_id, token)
     if not user:

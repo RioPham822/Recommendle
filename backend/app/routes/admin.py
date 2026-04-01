@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import get_category_profile, humanize_feature_list, normalize_category, supported_categories
 from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, UserRecord, get_db, record_to_dict
-from ..services.auth import auth_service, require_admin
+from ..services.auth import active_session_tokens, auth_service, require_admin
 from ..services.ml_config import DEFAULT_ML_CONFIG, ml_config_service
 from ..services.game_service import game_service
 from ..services.recommender import recommender
@@ -389,6 +389,37 @@ async def delete_user_account(
     }
 
 
+@router.post("/users/{user_id}/progress/clear")
+async def clear_user_progress(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: UserRecord = Depends(require_admin),
+):
+    user = await db.scalar(select(UserRecord).where(UserRecord.id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    candidate_names = [name for name in {user.display_name, user.username} if name]
+    games = (
+        await db.execute(
+            select(GameRecord.id).where(GameRecord.player_name.in_(candidate_names))
+        )
+    ).scalars().all()
+    game_ids = [str(game_id) for game_id in games]
+
+    if game_ids:
+        await db.execute(delete(GameRoundRecord).where(GameRoundRecord.game_id.in_(game_ids)))
+        await db.execute(delete(PrefixRatingRecord).where(PrefixRatingRecord.session_id.in_(game_ids)))
+        await db.execute(delete(GameRecord).where(GameRecord.id.in_(game_ids)))
+
+    await db.commit()
+    await recommender.refresh(db)
+    return {
+        "success": True,
+        "cleared_game_count": len(game_ids),
+    }
+
+
 @router.get("/users/{user_id}/ml-stats", response_model=AdminUserMlStatsOut)
 async def get_user_ml_stats(
     user_id: str,
@@ -401,10 +432,38 @@ async def get_user_ml_stats(
 
     await game_service.recommender.ensure_fresh(db)
     profiles: list[dict[str, Any]] = []
+    resumable_runs: list[dict[str, Any]] = []
+    candidate_names = [name for name in {user.display_name, user.username} if name]
     for category in supported_categories():
+        active_game_row = await db.scalar(
+            select(GameRecord)
+            .where(
+                and_(
+                    GameRecord.player_name.in_(candidate_names),
+                    GameRecord.category == category,
+                    GameRecord.status.in_(["onboarding", "ready", "playing"]),
+                )
+            )
+            .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
+            .limit(1)
+        )
+        if active_game_row:
+            active_game = record_to_dict(active_game_row)
+            resumable_runs.append(
+                {
+                    "category": category,
+                    "display_name": get_category_profile(category).display_name,
+                    "game_id": active_game["_id"],
+                    "status": active_game.get("status"),
+                    "current_round": int(active_game.get("current_round") or 0),
+                    "total_rounds": int(active_game.get("total_rounds") or 0),
+                    "updated_at": active_game.get("updated_at"),
+                    "player_name": active_game.get("player_name"),
+                }
+            )
         game_row = await db.scalar(
             select(GameRecord)
-            .where(and_(GameRecord.player_name == user.display_name, GameRecord.category == category))
+            .where(and_(GameRecord.player_name.in_(candidate_names), GameRecord.category == category))
             .order_by(GameRecord.updated_at.desc(), GameRecord.created_at.desc())
             .limit(1)
         )
@@ -437,9 +496,10 @@ async def get_user_ml_stats(
             "id": user.id,
             "username": user.username,
             "display_name": user.display_name,
-            "active_sessions": len(user.session_tokens or []),
+            "active_sessions": len(active_session_tokens(user.session_tokens)),
             "created_at": user.created_at,
             "updated_at": user.updated_at,
+            "resumable_runs": resumable_runs,
         },
         profiles=profiles,
     )

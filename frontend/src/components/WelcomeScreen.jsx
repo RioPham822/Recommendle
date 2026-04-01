@@ -22,6 +22,8 @@ export default function WelcomeScreen({
   logoSrc,
   playerName,
   setPlayerName,
+  accountDisplayName = '',
+  isAuthenticated = false,
   categories = [],
   selectedCategory,
   setSelectedCategory,
@@ -79,16 +81,19 @@ export default function WelcomeScreen({
         <div className="panel welcome-panel">
           <div className="welcome-panel__block">
             <label className="welcome-panel__label" htmlFor="player-name">
-              Player name
+              {isAuthenticated ? 'Display name' : 'Player name'}
             </label>
             <input
               id="player-name"
               value={playerName}
               onChange={(event) => setPlayerName(event.target.value)}
-              placeholder="How should we label this run?"
+              placeholder={isAuthenticated ? (accountDisplayName || 'Your account display name') : 'How should we label this run?'}
               maxLength={80}
-              disabled={loading}
+              disabled={loading || isAuthenticated}
             />
+            {isAuthenticated ? (
+              <p className="welcome-panel__hint">Runs are tied to your account display name.</p>
+            ) : null}
           </div>
 
           <div className="welcome-panel__block">
@@ -202,4 +207,3 @@ export default function WelcomeScreen({
     </section>
   );
 }
-

@@ -32,6 +32,7 @@ from ..schemas_game import (
     RoundStartOut,
 )
 from ..services.game_service import game_service
+from ..services.auth import get_optional_current_user
 
 router = APIRouter(prefix="/api/game", tags=["game"])
 
@@ -75,12 +76,13 @@ async def get_player_history(
 async def start_game(
     payload: GameCreate,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_optional_current_user),
 ):
     """Create a new game session."""
     try:
         game = await game_service.create_game(
             db,
-            player_name=payload.player_name,
+            player_name=(current_user.display_name if current_user else payload.player_name),
             category=payload.category,
             mode=payload.mode,
             total_rounds=5,
@@ -96,10 +98,15 @@ async def get_resume_state(
     player_name: str,
     category: str = "fountain_pens",
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_optional_current_user),
 ):
     """Return whether this player/category has an in-progress game."""
     try:
-        result = await game_service.get_resume_state(db, player_name=player_name, category=category)
+        result = await game_service.get_resume_state(
+            db,
+            player_name=(current_user.display_name if current_user else player_name),
+            category=category,
+        )
         return ResumableGameOut(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

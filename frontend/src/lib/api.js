@@ -82,6 +82,24 @@ export async function deleteAdminUser(userId) {
   return response.json();
 }
 
+export async function clearAdminUserProgress(userId) {
+  const response = await fetch(`${API_BASE}/api/admin/users/${userId}/progress/clear`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // Ignore JSON parsing errors; use status text.
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
 export async function getAdminMlConfig() {
   return request('/api/admin/ml-config');
 }

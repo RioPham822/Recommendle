@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  clearAdminUserProgress,
   deleteAdminUser,
   exportAdminProducts,
   getAdminMe,
@@ -91,6 +92,95 @@ function ProductCell({ column, value, row }) {
   }
 }
 
+function ProductCard({ row, columns, selected, onSelect }) {
+  const metaColumns = columns.filter((column) => ['badge', 'rating', 'number', 'date'].includes(column.kind));
+  const summaryColumns = columns.filter((column) => ['chips', 'long_text'].includes(column.kind));
+  const primaryMeta = metaColumns
+    .filter((column) => row[column.key] !== null && row[column.key] !== undefined && row[column.key] !== '')
+    .slice(0, 4);
+  const summaryColumn = summaryColumns.find((column) => row[column.key]);
+
+  return (
+    <button
+      type="button"
+      className={`admin-product-card ${selected ? 'active' : ''}`}
+      onClick={() => onSelect(row)}
+    >
+      <div className="admin-product-card__media">
+        {row.image_url ? (
+          <img src={row.image_url} alt={row.title ? `${row.title} cover` : 'Product thumbnail'} loading="lazy" />
+        ) : (
+          <div className="admin-product-card__placeholder" aria-hidden="true">
+            {String(formatCellValue(row.title)).slice(0, 1).toUpperCase()}
+          </div>
+        )}
+      </div>
+      <div className="admin-product-card__body">
+        <h3>{formatCellValue(row.title)}</h3>
+        {row.vendor ? <p className="admin-product-card__vendor">{row.vendor}</p> : null}
+        {primaryMeta.length ? (
+          <div className="admin-product-card__meta">
+            {primaryMeta.map((column) => (
+              <span key={`${row.id}-${column.key}`} className="admin-product-card__meta-pill">
+                {column.kind === 'rating' || column.kind === 'number' ? formatNumber(row[column.key]) : formatCellValue(row[column.key])}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {summaryColumn ? (
+          <div className="admin-product-card__summary">
+            <ProductCell column={summaryColumn} value={row[summaryColumn.key]} row={row} />
+          </div>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
+function ProductDetailPanel({ row, columns }) {
+  if (!row) {
+    return (
+      <div className="admin-product-detail admin-product-detail--empty">
+        <h3>Select a product</h3>
+        <p>Pick a card to inspect the full product record.</p>
+      </div>
+    );
+  }
+
+  const detailColumns = columns.filter((column) => column.key !== 'thumbnail');
+
+  return (
+    <div className="admin-product-detail">
+      <div className="admin-product-detail__hero">
+        <div className="admin-product-detail__image">
+          {row.image_url ? (
+            <img src={row.image_url} alt={row.title ? `${row.title} cover` : 'Product thumbnail'} loading="lazy" />
+          ) : (
+            <div className="admin-product-detail__placeholder" aria-hidden="true">
+              {String(formatCellValue(row.title)).slice(0, 1).toUpperCase()}
+            </div>
+          )}
+        </div>
+        <div className="admin-product-detail__intro">
+          <p className="eyebrow">Product details</p>
+          <h3>{formatCellValue(row.title)}</h3>
+          <p>{row.vendor || row.id}</p>
+        </div>
+      </div>
+      <div className="admin-product-detail__grid">
+        {detailColumns.map((column) => (
+          <section key={`${row.id}-${column.key}`} className="admin-product-detail__field">
+            <h4>{column.label}</h4>
+            <div>
+              <ProductCell column={column} value={row[column.key]} row={row} />
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MlProfileCard({ profile }) {
   return (
     <article className="admin-ml-card">
@@ -142,6 +232,26 @@ function MlProfileCard({ profile }) {
   );
 }
 
+function ResumableRunList({ runs = [] }) {
+  if (!runs.length) return null;
+  return (
+    <section className="admin-user-runs">
+      <h4>Active / resumable runs</h4>
+      <div className="admin-user-runs__grid">
+        {runs.map((run) => (
+          <article key={`${run.category}-${run.game_id}`} className="admin-user-runs__card">
+            <strong>{run.display_name}</strong>
+            <span>Status: {run.status || 'Unknown'}</span>
+            <span>
+              Continue from round {Math.min((run.current_round || 0) + 1, run.total_rounds || (run.current_round || 0) + 1)}
+            </span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function AdminScreen({ onBack }) {
   const [activeTab, setActiveTab] = useState('products');
   const [admin, setAdmin] = useState(null);
@@ -155,13 +265,16 @@ export default function AdminScreen({ onBack }) {
   const [page, setPage] = useState(0);
   const [productTable, setProductTable] = useState({ columns: [], rows: [], total: 0, limit: PAGE_SIZE, offset: 0 });
   const [productLoading, setProductLoading] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedUserStats, setSelectedUserStats] = useState(null);
   const [userStatsLoading, setUserStatsLoading] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState('');
+  const [clearingProgressUserId, setClearingProgressUserId] = useState('');
   const [pendingDeleteUser, setPendingDeleteUser] = useState(null);
+  const [pendingProgressClearUser, setPendingProgressClearUser] = useState(null);
   const [mlConfig, setMlConfig] = useState({});
   const [mlLoading, setMlLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -208,6 +321,12 @@ export default function AdminScreen({ onBack }) {
           sortDir,
         });
         setProductTable(payload);
+        setSelectedProduct((previous) => {
+          if (!payload.rows?.length) return null;
+          const preserved = previous ? payload.rows.find((row) => row.id === previous.id) : null;
+          return preserved || payload.rows[0];
+        });
+        setError('');
         const nextSortableColumns = payload.columns.filter((column) => column.key !== 'thumbnail');
         if (!nextSortableColumns.find((column) => column.key === sortField) && nextSortableColumns[0]) {
           setSortField(nextSortableColumns[0].key);
@@ -228,6 +347,7 @@ export default function AdminScreen({ onBack }) {
     try {
       const nextUsers = await listAdminUsers();
       setUsers(nextUsers);
+      setError('');
       return nextUsers;
     } catch (loadError) {
       setError(loadError.message || 'Unable to load users.');
@@ -243,11 +363,12 @@ export default function AdminScreen({ onBack }) {
   }, [activeTab]);
 
   useEffect(() => {
-    if (!selectedUserId || activeTab !== 'users' || deletingUserId === selectedUserId) return;
+    if (!selectedUserId || activeTab !== 'users' || deletingUserId === selectedUserId || clearingProgressUserId === selectedUserId) return;
     async function loadUserStats() {
       setUserStatsLoading(true);
       try {
         setSelectedUserStats(await getAdminUserMlStats(selectedUserId));
+        setError('');
       } catch (loadError) {
         if (String(loadError.message || '').toLowerCase().includes('user not found')) {
           setSelectedUserStats(null);
@@ -259,7 +380,7 @@ export default function AdminScreen({ onBack }) {
       }
     }
     loadUserStats();
-  }, [selectedUserId, activeTab, deletingUserId]);
+  }, [selectedUserId, activeTab, deletingUserId, clearingProgressUserId]);
 
   useEffect(() => {
     if (!message) return undefined;
@@ -268,11 +389,18 @@ export default function AdminScreen({ onBack }) {
   }, [message]);
 
   useEffect(() => {
+    if (!error) return undefined;
+    const timeoutId = window.setTimeout(() => setError(''), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [error]);
+
+  useEffect(() => {
     if (activeTab !== 'ml') return;
     async function loadMlConfig() {
       setMlLoading(true);
       try {
         setMlConfig(await getAdminMlConfig());
+        setError('');
       } catch (loadError) {
         setError(loadError.message || 'Unable to load ML settings.');
       } finally {
@@ -325,6 +453,32 @@ export default function AdminScreen({ onBack }) {
     }
   }
 
+  async function confirmClearUserProgress() {
+    if (!pendingProgressClearUser) return;
+    const userId = pendingProgressClearUser.id;
+    setError('');
+    setMessage('');
+    setClearingProgressUserId(userId);
+    setPendingProgressClearUser(null);
+    try {
+      const result = await clearAdminUserProgress(userId);
+      const nextUsers = await loadUsers();
+      const refreshedUser = nextUsers.find((user) => user.id === userId) || null;
+      if (selectedUserId === userId) {
+        if (refreshedUser) {
+          setSelectedUserStats(await getAdminUserMlStats(userId));
+        } else {
+          setSelectedUserStats(null);
+        }
+      }
+      setMessage(`Cleared ${result.cleared_game_count || 0} game record${result.cleared_game_count === 1 ? '' : 's'} for ${pendingProgressClearUser.display_name}.`);
+    } catch (progressError) {
+      setError(progressError.message || 'Unable to clear user progress.');
+    } finally {
+      setClearingProgressUserId('');
+    }
+  }
+
   async function handleSaveMlConfig() {
     setMlLoading(true);
     setError('');
@@ -369,80 +523,89 @@ export default function AdminScreen({ onBack }) {
 
       {activeTab === 'products' && (
         <div className="admin-panel">
-          <div className="admin-toolbar">
-            <label>
-              <span>Category</span>
-              <select
-                value={category}
-                onChange={(event) => {
-                  setCategory(event.target.value);
-                  setPage(0);
-                  setFilterKey('');
-                  setFilterValue('');
-                  setSortField('title');
-                }}
-              >
-                {categories.map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Search</span>
-              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Title or vendor" />
-            </label>
-            <label>
-              <span>Filter column</span>
-              <select value={filterKey} onChange={(event) => { setFilterKey(event.target.value); setPage(0); }}>
-                <option value="">None</option>
-                {queryableColumns.map((column) => (
-                  <option key={column.key} value={column.key}>{column.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Filter value</span>
-              <input value={filterValue} onChange={(event) => { setFilterValue(event.target.value); setPage(0); }} placeholder="Contains..." />
-            </label>
-            <label>
-              <span>Sort by</span>
-              <select value={sortField} onChange={(event) => setSortField(event.target.value)}>
-                {queryableColumns.map((column) => (
-                  <option key={column.key} value={column.key}>{column.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Direction</span>
-              <select value={sortDir} onChange={(event) => setSortDir(event.target.value)}>
-                <option value="asc">Ascending</option>
-                <option value="desc">Descending</option>
-              </select>
-            </label>
-            <button type="button" className="ghost" onClick={handleExportProducts}>Export CSV</button>
-          </div>
-
-          <div className="admin-table-wrap admin-table-wrap--products">
-            <table className="admin-table admin-table--products">
-              <thead>
-                <tr>
-                  {productTable.columns.map((column) => <th key={column.key}>{column.label}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {productLoading ? (
-                  <tr><td colSpan={productTable.columns.length}>Loading products...</td></tr>
-                ) : productTable.rows.length === 0 ? (
-                  <tr><td colSpan={productTable.columns.length}>No products found.</td></tr>
-                ) : productTable.rows.map((row) => (
-                  <tr key={row.id}>
-                    {productTable.columns.map((column) => (
-                      <td key={`${row.id}-${column.key}`}>
-                        <ProductCell column={column} value={row[column.key]} row={row} />
-                      </td>
+          <div className="admin-products-layout">
+            <aside className="admin-products-sidebar">
+              <div className="admin-toolbar admin-toolbar--stacked">
+                <label>
+                  <span>Category</span>
+                  <select
+                    value={category}
+                    onChange={(event) => {
+                      setCategory(event.target.value);
+                      setPage(0);
+                      setFilterKey('');
+                      setFilterValue('');
+                      setSortField('title');
+                    }}
+                  >
+                    {categories.map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Search</span>
+                  <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Title or vendor" />
+                </label>
+                <label>
+                  <span>Filter column</span>
+                  <select value={filterKey} onChange={(event) => { setFilterKey(event.target.value); setPage(0); }}>
+                    <option value="">None</option>
+                    {queryableColumns.map((column) => (
+                      <option key={column.key} value={column.key}>{column.label}</option>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </select>
+                </label>
+                <label>
+                  <span>Filter value</span>
+                  <input value={filterValue} onChange={(event) => { setFilterValue(event.target.value); setPage(0); }} placeholder="Contains..." />
+                </label>
+                <label>
+                  <span>Sort by</span>
+                  <select value={sortField} onChange={(event) => setSortField(event.target.value)}>
+                    {queryableColumns.map((column) => (
+                      <option key={column.key} value={column.key}>{column.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Direction</span>
+                  <select value={sortDir} onChange={(event) => setSortDir(event.target.value)}>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </label>
+                <button type="button" className="ghost" onClick={handleExportProducts}>Export CSV</button>
+              </div>
+            </aside>
+
+            <div className="admin-products-main">
+              <div className="admin-products-header">
+                <div>
+                  <p className="eyebrow">Catalog view</p>
+                  <h2>{categories.find((item) => item.id === category)?.display_name || 'Products'}</h2>
+                </div>
+                <span className="admin-products-count">{productTable.total || 0} products</span>
+              </div>
+
+              <div className="admin-products-content">
+                <div className="admin-products-grid">
+                  {productLoading ? (
+                    <div className="admin-products-empty">Loading products...</div>
+                  ) : productTable.rows.length === 0 ? (
+                    <div className="admin-products-empty">No products found.</div>
+                  ) : productTable.rows.map((row) => (
+                    <ProductCard
+                      key={row.id}
+                      row={row}
+                      columns={queryableColumns}
+                      selected={selectedProduct?.id === row.id}
+                      onSelect={setSelectedProduct}
+                    />
+                  ))}
+                </div>
+
+                <ProductDetailPanel row={selectedProduct} columns={productTable.columns} />
+              </div>
+            </div>
           </div>
 
           <div className="admin-pagination">
@@ -455,7 +618,7 @@ export default function AdminScreen({ onBack }) {
       )}
 
       {activeTab === 'users' && (
-        <div className={`admin-users-layout ${deletingUserId ? 'admin-users-layout--busy' : ''}`}>
+        <div className={`admin-users-layout ${deletingUserId || clearingProgressUserId ? 'admin-users-layout--busy' : ''}`}>
           <div className="admin-panel">
             <div className="admin-user-list">
               {usersLoading ? (
@@ -466,11 +629,17 @@ export default function AdminScreen({ onBack }) {
                   key={user.id}
                   className={`admin-user-card ${selectedUserId === user.id ? 'active' : ''}`}
                   onClick={() => setSelectedUserId(user.id)}
-                  disabled={Boolean(deletingUserId)}
+                  disabled={Boolean(deletingUserId || clearingProgressUserId)}
                 >
                   <strong>{user.display_name}</strong>
                   <span>@{user.username}</span>
-                  <span>{deletingUserId === user.id ? 'Deleting user...' : `${user.active_sessions} active sessions`}</span>
+                  <span>
+                    {deletingUserId === user.id
+                      ? 'Deleting user...'
+                      : clearingProgressUserId === user.id
+                        ? 'Clearing game progress...'
+                        : 'View user details'}
+                  </span>
                 </button>
               ))}
             </div>
@@ -482,6 +651,11 @@ export default function AdminScreen({ onBack }) {
                 <h3>Deleting user account...</h3>
                 <p>The backend is removing the user, games, preferences, and stored ML data. This can take a moment.</p>
               </div>
+            ) : clearingProgressUserId && clearingProgressUserId === selectedUserId ? (
+              <div className="admin-user-state">
+                <h3>Clearing game progress...</h3>
+                <p>The backend is removing this user's previous and ongoing game history while keeping the account.</p>
+              </div>
             ) : !selectedUserId ? (
               <p>Select a user to inspect their model profile.</p>
             ) : userStatsLoading ? (
@@ -492,17 +666,28 @@ export default function AdminScreen({ onBack }) {
                   <div>
                     <h3>{selectedUserStats.user.display_name}</h3>
                     <p>@{selectedUserStats.user.username}</p>
-                    <p>{selectedUserStats.user.active_sessions} active sessions</p>
+                    <p>{(selectedUserStats.user.resumable_runs || []).length} active or resumable runs</p>
                   </div>
-                  <button
-                    type="button"
-                    className="ghost danger"
-                    onClick={() => setPendingDeleteUser(selectedUserStats.user)}
-                    disabled={Boolean(deletingUserId)}
-                  >
-                    {deletingUserId === selectedUserId ? 'Deleting...' : 'Delete user account'}
-                  </button>
+                  <div className="admin-user-detail__actions">
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setPendingProgressClearUser(selectedUserStats.user)}
+                      disabled={Boolean(deletingUserId || clearingProgressUserId)}
+                    >
+                      Clear game progress
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost danger"
+                      onClick={() => setPendingDeleteUser(selectedUserStats.user)}
+                      disabled={Boolean(deletingUserId || clearingProgressUserId)}
+                    >
+                      {deletingUserId === selectedUserId ? 'Deleting...' : 'Delete user account'}
+                    </button>
+                  </div>
                 </div>
+                <ResumableRunList runs={selectedUserStats.user.resumable_runs || []} />
                 {selectedUserStats.profiles.length ? (
                   <div className="admin-ml-profile-list">
                     {selectedUserStats.profiles.map((profile) => (
@@ -534,6 +719,26 @@ export default function AdminScreen({ onBack }) {
               </button>
               <button type="button" className="danger-fill" onClick={confirmDeleteUser}>
                 Delete user
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingProgressClearUser ? (
+        <div className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-progress-title">
+          <div className="admin-modal__card admin-modal__card--compact">
+            <h3 id="admin-progress-title">Clear all game progress?</h3>
+            <p className="admin-modal__copy">
+              This will remove all previous and ongoing runs for <strong>{pendingProgressClearUser.display_name}</strong>.
+            </p>
+            <p className="admin-modal__copy">Their account will remain, but their run history, resumable runs, and stored in-game ML progress will be cleared.</p>
+            <div className="admin-modal__actions">
+              <button type="button" className="ghost" onClick={() => setPendingProgressClearUser(null)}>
+                Cancel
+              </button>
+              <button type="button" onClick={confirmClearUserProgress}>
+                Clear progress
               </button>
             </div>
           </div>
