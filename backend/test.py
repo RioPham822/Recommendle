@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import json
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
 from app.db import (
@@ -26,6 +28,43 @@ from app.db import (
     init_db,
 )
 from sqlalchemy import delete, func, select
+
+MOVIE_EXPORT_PRIORITY_COLUMNS = [
+    "_id",
+    "category",
+    "created_at",
+    "schema_version",
+    "source_id",
+    "title",
+    "product_type",
+    "vendor",
+    "release_year",
+    "release_date",
+    "runtime_minutes",
+    "vote_average",
+    "vote_count",
+    "popularity",
+    "status",
+    "has_poster",
+    "is_classic",
+    "original_language",
+    "certification",
+    "primary_country",
+    "decade_bucket",
+    "runtime_bucket",
+    "tags",
+    "genres",
+    "keywords",
+    "production_companies",
+    "directors",
+    "description",
+    "url",
+    "images",
+    "options",
+    "price_min",
+    "price_max",
+    "currency",
+]
 
 
 async def list_collections() -> None:
@@ -105,13 +144,93 @@ def _json_default(value: object) -> str:
     return str(value)
 
 
+def _normalize_export_value(value: object) -> str | int | float:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list):
+        return " | ".join(str(item) for item in value if item is not None)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, default=_json_default)
+    return value
+
+
+def _collect_movie_export_columns(movies: list[dict[str, object]]) -> list[str]:
+    discovered_columns: set[str] = set()
+    for movie in movies:
+        discovered_columns.update(str(key) for key in movie.keys())
+
+    ordered_columns = [column for column in MOVIE_EXPORT_PRIORITY_COLUMNS if column in discovered_columns]
+    remaining_columns = sorted(column for column in discovered_columns if column not in set(ordered_columns))
+    return ordered_columns + remaining_columns
+
+
+def _movie_row(movie: dict[str, object], columns: list[str]) -> list[str | int | float]:
+    return [_normalize_export_value(movie.get(key)) for key in columns]
+
+
+def _write_movies_csv(output_path: Path, movies: list[dict[str, object]], columns: list[str]) -> None:
+    with output_path.open("w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(columns)
+        for movie in movies:
+            writer.writerow(_movie_row(movie, columns))
+
+
+def _spreadsheet_cell_xml(value: str | int | float) -> str:
+    if isinstance(value, bool):
+        data_type = "String"
+        data_value = "TRUE" if value else "FALSE"
+    elif isinstance(value, int):
+        data_type = "Number"
+        data_value = str(value)
+    elif isinstance(value, float):
+        if value.is_integer():
+            data_type = "Number"
+            data_value = str(int(value))
+        else:
+            data_type = "Number"
+            data_value = repr(value)
+    else:
+        data_type = "String"
+        data_value = str(value)
+    return f'<Cell><Data ss:Type="{data_type}">{escape(data_value)}</Data></Cell>'
+
+
+def _write_movies_excel_xml(output_path: Path, movies: list[dict[str, object]], columns: list[str]) -> None:
+    header_cells = "".join(_spreadsheet_cell_xml(column) for column in columns)
+    rows = [f"<Row>{header_cells}</Row>"]
+    for movie in movies:
+        cell_xml = "".join(_spreadsheet_cell_xml(value) for value in _movie_row(movie, columns))
+        rows.append(f"<Row>{cell_xml}</Row>")
+
+    workbook_xml = (
+        '<?xml version="1.0"?>\n'
+        '<?mso-application progid="Excel.Sheet"?>\n'
+        '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+        'xmlns:o="urn:schemas-microsoft-com:office:office" '
+        'xmlns:x="urn:schemas-microsoft-com:office:excel" '
+        'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n'
+        '  <Worksheet ss:Name="Movies">\n'
+        "    <Table>\n"
+        f"      {'\n      '.join(rows)}\n"
+        "    </Table>\n"
+        "  </Worksheet>\n"
+        "</Workbook>\n"
+    )
+    output_path.write_text(workbook_xml, encoding="utf-8")
+
+
 async def export_movies_json(output: str) -> None:
     """Export all movie product records to a JSON file."""
     await init_db()
     db_gen = get_db()
     db = await anext(db_gen)
     rows = await db.execute(select(ProductRecord).where(ProductRecord.category == "movies"))
-    movies = [record_to_dict(row) for row in rows.scalars().all()][:10]
+    movies = [record_to_dict(row) for row in rows.scalars().all()]
     await db_gen.aclose()
 
     output_path = Path(output)
@@ -123,17 +242,45 @@ async def export_movies_json(output: str) -> None:
     print(f"output: {output_path}")
 
 
+async def export_movies_excel(output: str) -> None:
+    """Export all movie product records to an Excel-friendly spreadsheet file."""
+    await init_db()
+    db_gen = get_db()
+    db = await anext(db_gen)
+    rows = await db.execute(select(ProductRecord).where(ProductRecord.category == "movies"))
+    movies = [record_to_dict(row) for row in rows.scalars().all()]
+    await db_gen.aclose()
+    columns = _collect_movie_export_columns(movies)
+
+    output_path = Path(output)
+    if not output_path.is_absolute():
+        output_path = Path(__file__).resolve().parent / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    suffix = output_path.suffix.lower()
+    if suffix == ".csv":
+        _write_movies_csv(output_path, movies, columns)
+    elif suffix in {".xml", ".xls"}:
+        _write_movies_excel_xml(output_path, movies, columns)
+    else:
+        raise ValueError("Unsupported spreadsheet format. Use .csv, .xml, or .xls")
+
+    print(f"exported_movies: {len(movies)}")
+    print(f"columns: {len(columns)}")
+    print(f"output: {output_path}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Postgres local DB utility")
     parser.add_argument(
         "command",
-        choices=["summary", "list-collections", "clear-games", "clear-products", "export-movies-json"],
+        choices=["summary", "list-collections", "clear-games", "clear-products", "export-movies-json", "export-movies-excel"],
         help="Operation to run",
     )
     parser.add_argument(
         "--output",
-        default="data/movies_export.json",
-        help="Output file path for export-movies-json (default: backend/data/movies_export.json)",
+        default="data/movies_export.csv",
+        help="Output file path for movie export commands (default: backend/data/movies_export.csv)",
     )
     parser.add_argument(
         "--category",
@@ -153,6 +300,8 @@ def main() -> None:
         asyncio.run(clear_products(category=args.category))
     elif args.command == "export-movies-json":
         asyncio.run(export_movies_json(args.output))
+    elif args.command == "export-movies-excel":
+        asyncio.run(export_movies_excel(args.output))
     else:
         asyncio.run(list_collections())
 

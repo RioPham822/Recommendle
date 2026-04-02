@@ -58,6 +58,10 @@ class Recommender:
             self._rating_count = int(count or 0)
             await self.pbcf.train(db)
 
+    def invalidate_ratings(self) -> None:
+        """Mark collaborative-filtering ratings cache stale for lazy refresh on next use."""
+        self._rating_count = -1
+
     def load_state(self, game: dict[str, Any]) -> dict:
         """Load game model state or initialize default state."""
         state = game.get("model_state", {})

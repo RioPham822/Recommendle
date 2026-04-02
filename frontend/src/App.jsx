@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
+import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
+import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import logo from './assets/logo.svg';
 import logoDark from './assets/logo-dark.svg';
 import AuthScreen from './components/AuthScreen';
 import AccountMenu from './components/AccountMenu';
+import AdminScreen from './components/AdminScreen';
+import BetaSeedScreen from './components/BetaSeedScreen';
 import BrainModePanel from './components/BrainModePanel';
 import FinalSummary from './components/FinalSummary';
 import OnboardingGrid from './components/OnboardingGrid';
@@ -12,32 +16,42 @@ import RoundResultPanel from './components/RoundResultPanel';
 import SetRatingModal from './components/SetRatingModal';
 import WelcomeScreen from './components/WelcomeScreen';
 import {
+  clearAuthData,
+  getAuthToken,
   getCategories,
+  getDisplayName,
   getLeaderboard,
   getOnboarding,
   getResumeState,
+  getUserRole,
+  getUserId,
+  logoutUser,
+  refreshRound,
   startGame,
   startRound,
   submitOnboarding,
-    submitRoundPick,
-    logoutUser,
-    getAuthToken,
-    getUserId,
-    getDisplayName,
-    clearAuthData,
+  submitRoundPick,
+  submitSeedPreferences,
+  updatePreferences,
 } from './lib/api';
 
 const VIEW = {
   WELCOME: 'welcome',
+  SEED: 'seed',
   ONBOARDING: 'onboarding',
   ROUND: 'round',
   RESULT: 'result',
   FINAL: 'final',
+  ADMIN: 'admin',
 };
+
 const THEME_STORAGE_KEY = 'recommendle-theme';
-const MIN_CATEGORY_ITEMS = 50;
+const MIN_CATEGORY_ITEMS = 100;
 const CATEGORY_RETRY_MS = 2500;
 const CATEGORY_POLL_MS = 10000;
+const TRAINING_MODE = 'beta';
+const MIN_ONBOARDING_SELECTIONS = 1;
+const MAX_ONBOARDING_SELECTIONS = 10;
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -46,20 +60,11 @@ export default function App() {
     if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
-  
-  // Authentication state
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return !!localStorage.getItem('sessionToken');
-  });
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState('');
-  const [displayName, setDisplayName] = useState(() => {
-    return localStorage.getItem('displayName') || '';
-  });
-  const [username, setUsername] = useState(() => {
-    return localStorage.getItem('username') || '';
-  });
-  
+
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('sessionToken'));
+  const [displayName, setDisplayName] = useState(() => localStorage.getItem('displayName') || '');
+  const [username, setUsername] = useState(() => localStorage.getItem('username') || '');
+  const [userRole, setUserRole] = useState(() => getUserRole() || 'player');
   const [view, setView] = useState(VIEW.WELCOME);
   const [playerName, setPlayerName] = useState('');
   const [categories, setCategories] = useState([]);
@@ -69,37 +74,60 @@ export default function App() {
   const [game, setGame] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
-  const [rating, setRating] = useState(3);
+  const [rating, setRating] = useState(4);
   const [ratingModalOpen, setRatingModalOpen] = useState(false);
   const [roundData, setRoundData] = useState(null);
   const [selectedRoundPick, setSelectedRoundPick] = useState('');
   const [roundResult, setRoundResult] = useState(null);
+  const [seenHiddenPreferenceNames, setSeenHiddenPreferenceNames] = useState([]);
+  const [previousHiddenPreferenceNames, setPreviousHiddenPreferenceNames] = useState([]);
+  const [lessLikeIds, setLessLikeIds] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [seedBusy, setSeedBusy] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
   const [mode, setMode] = useState('visual');
   const [error, setError] = useState('');
+  const [seedPreferences, setSeedPreferences] = useState(null);
   const [busy, setBusy] = useState({
     start: false,
     onboarding: false,
     pick: false,
     next: false,
+    auth: false,
   });
-  const [welcomeLeaderboard, setWelcomeLeaderboard] = useState([]);
   const [viewingPlayer, setViewingPlayer] = useState(null);
   const [resumableGame, setResumableGame] = useState(null);
   const [resumeLoading, setResumeLoading] = useState(false);
+  const [preferenceBusyId, setPreferenceBusyId] = useState('');
 
   const activeCategory = game?.category || selectedCategory;
+  const activeLogo = theme === 'dark' ? logoDark : logo;
+  const showHeaderBrand = !(isAuthenticated && view === VIEW.WELCOME);
+  const homeHeader = !isAuthenticated || view === VIEW.WELCOME;
+  const activeCategoryCount = categories.filter((category) => (Number(category.available_count) || 0) >= MIN_CATEGORY_ITEMS).length;
+  const categoryProgress = categories.length
+    ? Math.round(
+      (categories.reduce((sum, category) => {
+        const count = Number(category.available_count) || 0;
+        return sum + Math.min(count / MIN_CATEGORY_ITEMS, 1);
+      }, 0) / categories.length) * 100,
+    )
+    : 0;
 
-  // Keep player name synced to authenticated display name after reload.
+  useEffect(() => {
+    document.body.setAttribute('data-theme', theme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [view]);
+
   useEffect(() => {
     if (!isAuthenticated) return;
-    setPlayerName((prev) => {
-      if (prev.trim()) return prev;
-      return displayName || getDisplayName() || '';
-    });
+    setPlayerName((previous) => previous.trim() || displayName || getDisplayName() || '');
   }, [isAuthenticated, displayName]);
 
-  // Load category metadata and keep it fresh while datasets ingest.
   useEffect(() => {
     let cancelled = false;
     let timerId;
@@ -114,29 +142,24 @@ export default function App() {
       try {
         const payload = await getCategories();
         if (cancelled) return;
-
         const nextCategories = Array.isArray(payload) ? payload : [];
         setCategories(nextCategories);
         setCategoriesLoading(false);
         setCategoryLoadError('');
-
         if (nextCategories.length > 0) {
-          setSelectedCategory((prev) => {
-            const hasSelected = nextCategories.some((c) => c.id === prev);
-            if (hasSelected) return prev;
-            const ready = nextCategories.find((c) => (c.available_count || 0) >= MIN_CATEGORY_ITEMS);
-            return (ready || nextCategories[0]).id;
+          setSelectedCategory((previous) => {
+            const current = nextCategories.find((category) => category.id === previous);
+            if (current) return previous;
+            const firstReady = nextCategories.find((category) => (category.available_count || 0) >= MIN_CATEGORY_ITEMS);
+            return (firstReady || nextCategories[0]).id;
           });
         }
-
-        const hasPendingDatasets = nextCategories.some(
-          (category) => (category.available_count || 0) < MIN_CATEGORY_ITEMS
-        );
-        schedule(hasPendingDatasets ? CATEGORY_RETRY_MS : CATEGORY_POLL_MS);
-      } catch (err) {
+        const hasPending = nextCategories.some((category) => (category.available_count || 0) < MIN_CATEGORY_ITEMS);
+        schedule(hasPending ? CATEGORY_RETRY_MS : CATEGORY_POLL_MS);
+      } catch (loadError) {
         if (cancelled) return;
         setCategoriesLoading(true);
-        setCategoryLoadError(err?.message || 'Unable to load categories');
+        setCategoryLoadError(loadError?.message || 'Unable to load categories.');
         schedule(CATEGORY_RETRY_MS);
       }
     };
@@ -144,40 +167,26 @@ export default function App() {
     loadCategories();
     return () => {
       cancelled = true;
-      if (timerId) {
-        window.clearTimeout(timerId);
-      }
+      if (timerId) window.clearTimeout(timerId);
     };
   }, []);
 
-  // Load leaderboard for selected category on welcome screen.
   useEffect(() => {
     getLeaderboard(10, selectedCategory)
-      .then(setWelcomeLeaderboard)
+      .then(setLeaderboard)
       .catch(() => {});
   }, [selectedCategory]);
 
-  // Detect resumable game for current player/category on welcome screen.
   useEffect(() => {
     let cancelled = false;
-    const loadResumeState = async () => {
-      if (!isAuthenticated || view !== VIEW.WELCOME) {
-        setResumeLoading(false);
-        return;
-      }
-      if (categoriesLoading) {
-        setResumeLoading(false);
-        return;
-      }
-      const name = playerName.trim();
-      if (!name) {
-        setResumableGame(null);
+    async function loadResumeState() {
+      if (!isAuthenticated || view !== VIEW.WELCOME || categoriesLoading || !playerName.trim()) {
         setResumeLoading(false);
         return;
       }
       setResumeLoading(true);
       try {
-        const state = await getResumeState(name, selectedCategory);
+        const state = await getResumeState(playerName.trim(), selectedCategory);
         if (!cancelled) {
           setResumableGame(state);
           setResumeLoading(false);
@@ -188,186 +197,267 @@ export default function App() {
           setResumeLoading(false);
         }
       }
-    };
+    }
+
     loadResumeState();
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, view, playerName, selectedCategory, categoriesLoading]);
+  }, [isAuthenticated, playerName, selectedCategory, view, categoriesLoading]);
 
-  // Handle login success
-  const handleLoginSuccess = (authData) => {
+  function toggleTheme() {
+    setTheme((previous) => (previous === 'light' ? 'dark' : 'light'));
+  }
+
+  function handleLoginSuccess(authData) {
     setIsAuthenticated(true);
     setDisplayName(authData.displayName);
     setUsername(authData.username);
-    setPlayerName(authData.displayName); // Use display name as player name
-    setAuthError('');
-    setAuthLoading(false);
-  };
+    setUserRole(authData.role || 'player');
+    setPlayerName(authData.displayName);
+    setBusy((previous) => ({ ...previous, auth: false }));
+  }
 
-  // Handle logout
-  const handleLogout = async () => {
+  async function handleLogout() {
     try {
       const userId = getUserId();
       const token = getAuthToken();
       if (userId && token) {
         await logoutUser(userId, token);
       }
-    } catch (err) {
-      console.error('Logout error:', err);
+    } catch (logoutError) {
+      console.error('Logout failed', logoutError);
     } finally {
       clearAuthData();
       setIsAuthenticated(false);
       setDisplayName('');
       setUsername('');
+      setUserRole('player');
       setPlayerName('');
       resetAll();
     }
-  };
-
-  const totalRounds = game?.total_rounds ?? 5;
-  const humanScore = game?.human_score ?? 0;
-  const aiScore = game?.ai_score ?? 0;
-  const categoryProgress = categories.length
-    ? Math.round(
-      (categories.reduce((sum, category) => {
-        const count = Number(category.available_count) || 0;
-        return sum + Math.min(count / MIN_CATEGORY_ITEMS, 1);
-      }, 0) / categories.length) * 100
-    )
-    : 0;
-  const readyCategoryCount = categories.filter(
-    (category) => (Number(category.available_count) || 0) >= MIN_CATEGORY_ITEMS
-  ).length;
-
-  useEffect(() => {
-    document.body.setAttribute('data-theme', theme);
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
-
-  function toggleTheme() {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   }
 
-  const activeLogo = theme === 'dark' ? logoDark : logo;
+  function applyGameProgress(source) {
+    setGame((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        human_score: source.total_human_score ?? source.human_score ?? previous.human_score,
+        ai_score: source.total_ai_score ?? source.ai_score ?? previous.ai_score,
+        current_match_streak: source.current_match_streak ?? previous.current_match_streak,
+        longest_match_streak: source.longest_match_streak ?? previous.longest_match_streak,
+        match_streak_target: source.match_streak_target ?? previous.match_streak_target,
+        rounds_played: source.rounds_played ?? previous.rounds_played,
+        status: source.game_complete ? 'completed' : source.status ?? previous.status,
+      };
+    });
+  }
 
   function resetAll() {
     setView(VIEW.WELCOME);
     setGame(null);
     setOnboarding(null);
     setSelectedIds([]);
-    setRating(3);
+    setRating(4);
     setRatingModalOpen(false);
     setRoundData(null);
     setSelectedRoundPick('');
     setRoundResult(null);
-    setLeaderboard([]);
+    setSeenHiddenPreferenceNames([]);
+    setPreviousHiddenPreferenceNames([]);
+    setLessLikeIds([]);
+    setSeedPreferences(null);
     setError('');
     setResumableGame(null);
     setResumeLoading(false);
-    setBusy({ start: false, onboarding: false, pick: false, next: false });
-    // Refresh welcome leaderboard
-    getLeaderboard(10, selectedCategory)
-      .then(setWelcomeLeaderboard)
-      .catch(() => {});
+    setPreferenceBusyId('');
+    setBusy({
+      start: false,
+      onboarding: false,
+      pick: false,
+      next: false,
+      auth: false,
+    });
   }
 
   async function loadNextRound(gameId) {
     const round = await startRound(gameId);
     setRoundData(round);
+    setRoundResult(null);
     setSelectedRoundPick('');
+    setLessLikeIds([]);
+    applyGameProgress(round);
     setView(VIEW.ROUND);
   }
 
   async function handleStart(freshStart = false) {
     setError('');
-    const selected = categories.find((c) => c.id === selectedCategory);
-    if (selected && selected.available_count < MIN_CATEGORY_ITEMS) {
-      setError(`The ${selected.display_name} catalog is not loaded yet. Run movie ingestion first.`);
+    const selected = categories.find((category) => category.id === selectedCategory);
+    if (!selected || selected.available_count < MIN_CATEGORY_ITEMS) {
+      setError(`The ${selected?.display_name || 'selected'} catalog is not ready for the 100-item onboarding pool yet.`);
       return;
     }
-    setBusy((prev) => ({ ...prev, start: true }));
+
+    setBusy((previous) => ({ ...previous, start: true }));
     try {
-      const created = await startGame(playerName, selectedCategory, freshStart);
+      const created = await startGame(playerName.trim(), selectedCategory, freshStart, TRAINING_MODE);
       setGame(created);
+      setOnboarding(null);
+      setSeedPreferences(null);
+      setRoundData(null);
+      setRoundResult(null);
+      setSeenHiddenPreferenceNames([]);
+      setPreviousHiddenPreferenceNames([]);
       setSelectedIds([]);
-      if (created.status === VIEW.ONBOARDING) {
-        const onboardingPayload = await getOnboarding(created.id);
-        setOnboarding(onboardingPayload);
-        setView(VIEW.ONBOARDING);
+      setLessLikeIds([]);
+      if (created.status === 'onboarding') {
+        if (!created.resumed) {
+          setView(VIEW.SEED);
+        } else {
+          const onboardingPayload = await getOnboarding(created.id);
+          setOnboarding(onboardingPayload);
+          setView(VIEW.ONBOARDING);
+        }
       } else {
-        setOnboarding(null);
         await loadNextRound(created.id);
       }
-    } catch (err) {
-      setError(err.message);
+    } catch (startError) {
+      setError(startError.message || 'Could not start the run.');
     } finally {
-      setBusy((prev) => ({ ...prev, start: false }));
+      setBusy((previous) => ({ ...previous, start: false }));
     }
   }
 
   function handleToggleOnboarding(productId) {
-    setSelectedIds((prev) => {
-      if (prev.includes(productId)) {
-        return prev.filter((id) => id !== productId);
+    setSelectedIds((previous) => {
+      if (previous.includes(productId)) {
+        return previous.filter((id) => id !== productId);
       }
-      if (prev.length >= 10) {
-        return prev;
+      if (previous.length >= MAX_ONBOARDING_SELECTIONS) {
+        return previous;
       }
-      return [...prev, productId];
+      return [...previous, productId];
     });
   }
 
   async function handleSubmitOnboarding() {
-    if (!game || selectedIds.length !== 10) {
-      setError('Select exactly 10 products before continuing.');
+    if (!game || selectedIds.length < MIN_ONBOARDING_SELECTIONS || selectedIds.length > MAX_ONBOARDING_SELECTIONS) {
+      setError(`Choose between ${MIN_ONBOARDING_SELECTIONS} and ${MAX_ONBOARDING_SELECTIONS} items before continuing.`);
       return;
     }
-
+    setBusy((previous) => ({ ...previous, onboarding: true }));
     setError('');
-    setBusy((prev) => ({ ...prev, onboarding: true }));
     try {
       await submitOnboarding(game.id, selectedIds, rating);
-      setGame((prev) => ({ ...prev, status: 'playing' }));
       setRatingModalOpen(false);
+      setGame((previous) => (previous ? { ...previous, status: 'playing' } : previous));
       await loadNextRound(game.id);
-    } catch (err) {
-      setError(err.message);
+    } catch (submissionError) {
+      setError(submissionError.message || 'Could not save your onboarding set.');
     } finally {
-      setBusy((prev) => ({ ...prev, onboarding: false }));
+      setBusy((previous) => ({ ...previous, onboarding: false }));
+    }
+  }
+
+  async function handleSeedSubmit(payload) {
+    if (!game) return;
+    setSeedBusy(true);
+    setError('');
+    try {
+      setSeedPreferences(payload);
+      await submitSeedPreferences(
+        game.id,
+        payload.likes,
+        payload.dislikes,
+        payload.like_product_ids || [],
+        payload.dislike_product_ids || [],
+      );
+      const onboardingPayload = await getOnboarding(game.id);
+      setOnboarding(onboardingPayload);
+      setView(VIEW.ONBOARDING);
+    } catch (seedError) {
+      setSeedPreferences(null);
+      setError(seedError.message || 'Could not save your preference signals.');
+    } finally {
+      setSeedBusy(false);
+    }
+  }
+
+  async function handleSeedSkip() {
+    if (!game) return;
+    setError('');
+    try {
+      const onboardingPayload = await getOnboarding(game.id);
+      setOnboarding(onboardingPayload);
+      setView(VIEW.ONBOARDING);
+    } catch (skipError) {
+      setError(skipError.message || 'Could not load onboarding.');
     }
   }
 
   async function handleSubmitRoundPick() {
-    if (!game || !roundData || !selectedRoundPick) {
-      return;
-    }
-
+    if (!game || !roundData || !selectedRoundPick) return;
+    setBusy((previous) => ({ ...previous, pick: true }));
     setError('');
-    setBusy((prev) => ({ ...prev, pick: true }));
     try {
-      const result = await submitRoundPick(game.id, roundData.round_number, selectedRoundPick);
-      setRoundResult(result);
-      setGame((prev) => ({
-        ...prev,
-        human_score: result.total_human_score,
-        ai_score: result.total_ai_score,
-      }));
+      const result = await submitRoundPick(game.id, roundData.round_number, selectedRoundPick, lessLikeIds);
+      const hiddenPreferenceNames = (result.ai_explanation?.hidden_preferences || [])
+        .map(([name]) => String(name || '').trim().toLowerCase())
+        .filter(Boolean);
+      const hiddenHints = result.ai_explanation?.hidden_preference_hints || [];
+      const seenHiddenSet = new Set(seenHiddenPreferenceNames);
+      const previousHiddenSet = new Set(previousHiddenPreferenceNames);
+      const recurringHiddenPreferenceNames = hiddenPreferenceNames.filter((name) => previousHiddenSet.has(name));
+      const hasNewRecurringHiddenPreference = recurringHiddenPreferenceNames.some((name) => !seenHiddenSet.has(name));
+      const hiddenPreferenceDetected = (
+        result.round_number >= 4
+        && hiddenHints.length > 0
+        && hasNewRecurringHiddenPreference
+      );
+
+      setRoundResult({
+        ...result,
+        hidden_preference_detected: hiddenPreferenceDetected,
+      });
+      setSeenHiddenPreferenceNames((previous) => {
+        const merged = new Set(previous);
+        if (hiddenPreferenceDetected) {
+          recurringHiddenPreferenceNames.forEach((name) => merged.add(name));
+        }
+        return [...merged];
+      });
+      setPreviousHiddenPreferenceNames(hiddenPreferenceNames);
+      applyGameProgress(result);
       setView(VIEW.RESULT);
-    } catch (err) {
-      setError(err.message);
+    } catch (pickError) {
+      setError(pickError.message || 'Could not submit your pick.');
     } finally {
-      setBusy((prev) => ({ ...prev, pick: false }));
+      setBusy((previous) => ({ ...previous, pick: false }));
+    }
+  }
+
+  async function handleRefreshRound() {
+    if (!game) return;
+    setRefreshing(true);
+    setError('');
+    try {
+      const refreshedRound = await refreshRound(game.id, lessLikeIds);
+      setRoundData(refreshedRound);
+      applyGameProgress(refreshedRound);
+      setSelectedRoundPick('');
+      setLessLikeIds([]);
+    } catch (refreshError) {
+      setError(refreshError.message || 'Could not refresh the round.');
+    } finally {
+      setRefreshing(false);
     }
   }
 
   async function handleResultNext() {
-    if (!game || !roundResult) {
-      return;
-    }
-
+    if (!game || !roundResult) return;
+    setBusy((previous) => ({ ...previous, next: true }));
     setError('');
-    setBusy((prev) => ({ ...prev, next: true }));
     try {
       if (roundResult.game_complete) {
         const board = await getLeaderboard(10, activeCategory);
@@ -376,81 +466,128 @@ export default function App() {
       } else {
         await loadNextRound(game.id);
       }
-    } catch (err) {
-      setError(err.message);
+    } catch (nextError) {
+      setError(nextError.message || 'Could not continue.');
     } finally {
-      setBusy((prev) => ({ ...prev, next: false }));
+      setBusy((previous) => ({ ...previous, next: false }));
+    }
+  }
+
+  async function handleRemovePreference(productId) {
+    if (!game || !roundData) return;
+    const currentIds = (roundData.preference_deck || []).map((item) => item.id);
+    const nextIds = currentIds.filter((id) => id !== productId);
+    setPreferenceBusyId(productId);
+    setError('');
+    try {
+      const updated = await updatePreferences(game.id, nextIds);
+      applyGameProgress(updated);
+      setRoundData((previous) => {
+        if (!previous) return previous;
+        if (updated.round) return updated.round;
+        return {
+          ...previous,
+          preference_deck: updated.preference_deck,
+          current_match_streak: updated.current_match_streak,
+          longest_match_streak: updated.longest_match_streak,
+          match_streak_target: updated.match_streak_target,
+          rounds_played: updated.rounds_played,
+        };
+      });
+      setRoundResult((previous) => {
+        if (!previous) return previous;
+        return {
+          ...previous,
+          preference_deck: updated.preference_deck,
+          current_match_streak: updated.current_match_streak,
+          longest_match_streak: updated.longest_match_streak,
+          match_streak_target: updated.match_streak_target,
+          rounds_played: updated.rounds_played,
+        };
+      });
+      setSelectedRoundPick('');
+    } catch (preferenceError) {
+      setError(preferenceError.message || 'Could not update your preference deck.');
+    } finally {
+      setPreferenceBusyId('');
     }
   }
 
   async function handlePlayAgain() {
-    if (!playerName.trim()) {
-      return;
-    }
-    await handleStart(false);
+    if (!playerName.trim()) return;
+    await handleStart(true);
   }
 
   return (
-    <main className="app-root">
-      <div className="top-right-controls">
-        <button
-          type="button"
-          className="theme-toggle"
-          onClick={toggleTheme}
-          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        >
-          {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
-        </button>
-        {isAuthenticated && (
-          <div className="account-floating">
-            <AccountMenu
-              displayName={displayName}
-              username={username}
-              onLogout={handleLogout}
-              loading={authLoading}
-            />
-          </div>
+    <main className="app-shell">
+      <header className={`app-shell__header ${isAuthenticated ? 'authenticated' : 'public'} ${homeHeader ? 'app-shell__header--home' : 'app-shell__header--blurred'}`}>
+        {showHeaderBrand ? (
+          <button
+            type="button"
+            className="brand-home"
+            onClick={() => {
+              if (isAuthenticated) resetAll();
+            }}
+            aria-label="Go home"
+          >
+            <img src={activeLogo} alt="Recommendle" className="app-logo" />
+          </button>
+        ) : (
+          <div className="app-shell__brand-spacer" aria-hidden="true" />
         )}
-      </div>
-
-      {!isAuthenticated && view === VIEW.WELCOME && (
-        <header className="app-header welcome-header">
-          <img src={activeLogo} alt="Recommendle" className="app-logo" />
-        </header>
-      )}
-
-      {!isAuthenticated && view === VIEW.WELCOME && (
-        <AuthScreen
-          logoSrc={activeLogo}
-          onLoginSuccess={handleLoginSuccess}
-          loading={authLoading}
-          error={authError}
-        />
-      )}
-
-      {isAuthenticated && (
-        <>
-          {error && (
-            <div className="error-banner">
-              <span>{error}</span>
-              <button type="button" onClick={() => setError('')}>Dismiss</button>
-            </div>
-          )}
-
-          {view !== VIEW.WELCOME && view !== VIEW.FINAL && (
+        <div className="app-shell__actions">
+          {isAuthenticated && (view === VIEW.ONBOARDING || view === VIEW.ROUND) && (
             <BrainModePanel
               mode={mode}
               onModeChange={setMode}
-              categoryCopy={onboarding?.category_copy || roundData?.category_copy || roundResult?.category_copy || {}}
+              categoryCopy={onboarding?.category_copy || roundData?.category_copy || {}}
             />
           )}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={toggleTheme}
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+          >
+            {theme === 'light' ? <DarkModeOutlinedIcon fontSize="small" /> : <LightModeOutlinedIcon fontSize="small" />}
+          </button>
+          {isAuthenticated && (
+            <AccountMenu
+              displayName={displayName}
+              username={username}
+              isAdmin={userRole === 'admin'}
+              onOpenAdmin={() => setView(VIEW.ADMIN)}
+              onLogout={handleLogout}
+              loading={busy.auth}
+            />
+          )}
+        </div>
+      </header>
 
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button type="button" className="ghost" onClick={() => setError('')}>Dismiss</button>
+        </div>
+      )}
+
+      {!isAuthenticated ? (
+        <AuthScreen
+          logoSrc={activeLogo}
+          onLoginSuccess={handleLoginSuccess}
+          loading={busy.auth}
+          error=""
+        />
+      ) : (
+        <>
           {view === VIEW.WELCOME && (
             <WelcomeScreen
               logoSrc={activeLogo}
-              showLogo={true}
               playerName={playerName}
               setPlayerName={setPlayerName}
+              accountDisplayName={displayName}
+              isAuthenticated={isAuthenticated}
               categories={categories}
               selectedCategory={selectedCategory}
               setSelectedCategory={setSelectedCategory}
@@ -462,17 +599,18 @@ export default function App() {
               categoriesLoading={categoriesLoading}
               categoryLoadError={categoryLoadError}
               categoryProgress={categoryProgress}
-              readyCategoryCount={readyCategoryCount}
-              leaderboard={welcomeLeaderboard}
+              readyCategoryCount={activeCategoryCount}
+              leaderboard={leaderboard}
               onViewPlayer={(name) => setViewingPlayer(name)}
             />
           )}
 
-          {viewingPlayer && (
-            <PlayerStatsModal
-              playerName={viewingPlayer}
+          {view === VIEW.SEED && (
+            <BetaSeedScreen
               category={activeCategory}
-              onClose={() => setViewingPlayer(null)}
+              onSkip={handleSeedSkip}
+              onSubmit={handleSeedSubmit}
+              loading={seedBusy}
             />
           )}
 
@@ -483,10 +621,10 @@ export default function App() {
                 selectedIds={selectedIds}
                 onToggle={handleToggleOnboarding}
                 onOpenRating={() => setRatingModalOpen(true)}
-                onHome={resetAll}
                 mode={mode}
-                categoryCopy={onboarding?.category_copy || {}}
-              />
+              categoryCopy={onboarding.category_copy || {}}
+              seedPreferences={seedPreferences}
+            />
               <SetRatingModal
                 open={ratingModalOpen}
                 rating={rating}
@@ -494,7 +632,7 @@ export default function App() {
                 loading={busy.onboarding}
                 onClose={() => setRatingModalOpen(false)}
                 onSubmit={handleSubmitOnboarding}
-                categoryCopy={onboarding?.category_copy || {}}
+                categoryCopy={onboarding.category_copy || {}}
               />
             </>
           )}
@@ -502,16 +640,23 @@ export default function App() {
           {view === VIEW.ROUND && (
             <RoundArena
               round={roundData}
-              totalRounds={totalRounds}
-              humanScore={humanScore}
-              aiScore={aiScore}
               mode={mode}
-              categoryCopy={roundData?.category_copy || {}}
               selectedPick={selectedRoundPick}
               onSelectPick={setSelectedRoundPick}
               onSubmitPick={handleSubmitRoundPick}
-              onHome={resetAll}
+              lessLikeIds={lessLikeIds}
+              onToggleLessLike={(id) => {
+                setLessLikeIds((previous) => (
+                  previous.includes(id)
+                    ? previous.filter((item) => item !== id)
+                    : [...previous, id]
+                ));
+              }}
+              onRefresh={handleRefreshRound}
+              refreshing={refreshing}
               submitting={busy.pick}
+              onRemovePreference={handleRemovePreference}
+              preferenceBusyId={preferenceBusyId}
             />
           )}
 
@@ -519,8 +664,8 @@ export default function App() {
             <RoundResultPanel
               result={roundResult}
               categoryCopy={roundResult?.category_copy || {}}
+              mode={mode}
               onNext={handleResultNext}
-              onHome={resetAll}
               loadingNext={busy.next}
             />
           )}
@@ -528,14 +673,23 @@ export default function App() {
           {view === VIEW.FINAL && (
             <FinalSummary
               playerName={playerName}
-              humanScore={humanScore}
-              aiScore={aiScore}
               category={activeCategory}
               gameId={game?.id}
               leaderboard={leaderboard}
               onRestart={handlePlayAgain}
-              onHome={resetAll}
               onViewPlayer={(name) => setViewingPlayer(name)}
+            />
+          )}
+
+          {view === VIEW.ADMIN && userRole === 'admin' && (
+            <AdminScreen onBack={() => setView(VIEW.WELCOME)} />
+          )}
+
+          {viewingPlayer && (
+            <PlayerStatsModal
+              playerName={viewingPlayer}
+              category={activeCategory}
+              onClose={() => setViewingPlayer(null)}
             />
           )}
         </>

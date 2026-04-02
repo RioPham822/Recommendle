@@ -14,17 +14,25 @@ from ..schemas_game import (
     GameOut,
     GameStatusOut,
     GameSummaryOut,
+    FeedbackOut,
+    FeedbackSubmit,
+    SeedPreferencesOut,
+    SeedPreferencesSubmit,
     LeaderboardEntry,
     OnboardingOut,
     OnboardingSubmit,
     OnboardingSubmitOut,
     PlayerGameEntry,
+    PreferenceUpdateOut,
+    PreferenceUpdateSubmit,
     ResumableGameOut,
     RoundPickSubmit,
     RoundResultOut,
+    RoundRefreshSubmit,
     RoundStartOut,
 )
 from ..services.game_service import game_service
+from ..services.auth import get_optional_current_user
 
 router = APIRouter(prefix="/api/game", tags=["game"])
 
@@ -68,13 +76,15 @@ async def get_player_history(
 async def start_game(
     payload: GameCreate,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_optional_current_user),
 ):
     """Create a new game session."""
     try:
         game = await game_service.create_game(
             db,
-            player_name=payload.player_name,
+            player_name=(current_user.display_name if current_user else payload.player_name),
             category=payload.category,
+            mode=payload.mode,
             total_rounds=5,
             fresh_start=payload.fresh_start,
         )
@@ -88,10 +98,15 @@ async def get_resume_state(
     player_name: str,
     category: str = "fountain_pens",
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_optional_current_user),
 ):
     """Return whether this player/category has an in-progress game."""
     try:
-        result = await game_service.get_resume_state(db, player_name=player_name, category=category)
+        result = await game_service.get_resume_state(
+            db,
+            player_name=(current_user.display_name if current_user else player_name),
+            category=category,
+        )
         return ResumableGameOut(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -156,8 +171,85 @@ async def submit_round_pick(
             game_id,
             round_number,
             payload.product_id,
+            less_like_ids=payload.less_like_ids,
         )
         return RoundResultOut(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{game_id}/round/refresh", response_model=RoundStartOut)
+async def refresh_round(
+    game_id: str,
+    payload: RoundRefreshSubmit,
+    db: AsyncSession = Depends(get_db),
+):
+    """Refresh the current round with optional less-like selections."""
+    try:
+        result = await game_service.refresh_round(
+            db,
+            game_id,
+            less_like_ids=payload.less_like_ids,
+        )
+        return RoundStartOut(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{game_id}/feedback", response_model=FeedbackOut)
+async def submit_feedback(
+    game_id: str,
+    payload: FeedbackSubmit,
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit beta feedback such as 'less like this'."""
+    try:
+        result = await game_service.submit_feedback(
+            db,
+            game_id,
+            product_id=payload.product_id,
+            action=payload.action,
+        )
+        return FeedbackOut(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{game_id}/seed", response_model=SeedPreferencesOut)
+async def submit_seed_preferences(
+    game_id: str,
+    payload: SeedPreferencesSubmit,
+    db: AsyncSession = Depends(get_db),
+):
+    """Seed preferences before onboarding (beta mode)."""
+    try:
+        result = await game_service.submit_seed_preferences(
+            db,
+            game_id,
+            likes=payload.likes,
+            dislikes=payload.dislikes,
+            like_product_ids=payload.like_product_ids,
+            dislike_product_ids=payload.dislike_product_ids,
+        )
+        return SeedPreferencesOut(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/{game_id}/preferences", response_model=PreferenceUpdateOut)
+async def update_preferences(
+    game_id: str,
+    payload: PreferenceUpdateSubmit,
+    db: AsyncSession = Depends(get_db),
+):
+    """Rebuild the active preference deck and refresh the current round if needed."""
+    try:
+        result = await game_service.update_preferences(
+            db,
+            game_id,
+            active_preference_ids=payload.active_preference_ids,
+        )
+        return PreferenceUpdateOut(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

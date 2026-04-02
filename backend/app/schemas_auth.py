@@ -28,6 +28,7 @@ class UserOut(BaseModel):
 
     id: str
     username: str
+    role: str
     display_name: str
     created_at: datetime
 
@@ -37,6 +38,7 @@ class AuthTokenOut(BaseModel):
 
     user_id: str
     username: str
+    role: str
     display_name: str
     session_token: str
     expires_at: str

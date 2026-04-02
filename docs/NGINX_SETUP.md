@@ -33,6 +33,7 @@ From repo root:
 
 ```bash
 docker compose up -d postgres backend
+docker compose exec backend python -m scripts.load_db
 ```
 
 ### Local frontend + backend (for testing on VM)
@@ -46,6 +47,9 @@ docker compose --profile local-frontend up -d --build
 ```bash
 curl http://127.0.0.1:8015/api/game/categories
 ```
+
+Note:
+- if `fountain_pens` is missing or has too few items, seed the dataset first with `python -m scripts.load_db`
 
 ## 3. Prepare Nginx Config
 
