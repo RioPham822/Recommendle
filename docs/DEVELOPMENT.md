@@ -1,260 +1,179 @@
 # Development Guide
 
-Technical reference for contributors working on Recommendle.
-For clone-to-run setup, use the root `README.md`.
+This guide is the technical reference for contributors. For the shortest clone-to-run path, use the root `README.md`.
 
----
+## Current Architecture
 
-## 1. Current Capability Snapshot
-
-### Implemented
-- Postgres-first backend (`app.main`) with category-aware gameplay.
-- Full fountain pen flow:
-  - onboarding pool of 50
-  - select exactly 10
-  - set-level rating
-  - 5 game rounds, 10 candidates per round
-  - round scoring + final summary
-- Movie category support (when ingested) via TMDB script.
-- Hidden preference detection + hidden gem recommendations.
-- Category-scoped leaderboard and player history.
-- Light/dark mode UI and per-theme logo handling.
-- Backend unit tests for category features and hidden preference behavior.
-
-### In Progress / Optional
-- Large-scale movie ingestion completion depends on valid TMDB key and runtime.
-
----
-
-## 2. Runtime Architecture
-
-### Active app path
+Active runtime:
 - Backend entrypoint: `backend/app/main.py`
-- Frontend dev server: Vite (`frontend`)
+- Frontend app: `frontend/src/App.jsx`
 - Database: Postgres
+- Local orchestration: `docker-compose.yml`
 
-### Legacy compatibility
-- The project is Postgres-first; legacy SQLite support has been removed from main documentation.
+Request flow:
+1. The React frontend calls the backend through `frontend/src/lib/api.js`.
+2. FastAPI routes live in `backend/app/routes/`.
+3. Core gameplay lives in `backend/app/services/game_service.py` plus the mixins in `game_play.py` and `game_insights.py`.
+4. Recommendation state is built with category-aware features from `backend/app/category_profiles.py`.
+5. Model refresh and shared recommendation state live in `backend/app/services/recommender.py`.
 
-### Request flow (active mode)
-1. React frontend calls `/api/game/*`.
-2. FastAPI game routes in `backend/app/routes/game.py`.
-3. Game logic in `backend/app/services/game_service.py`.
-4. Model and feature-space logic in `backend/app/ml/prefix_cf.py`.
-5. Data read/write through Postgres tables.
+## Current Product Surface
 
----
+Implemented:
+- Postgres-first backend with category-aware gameplay.
+- Supported categories: `fountain_pens`, `movies`, `games`.
+- Account-based auth with expiring session tokens.
+- Admin APIs and frontend admin screen.
+- Classic gameplay plus beta-mode preference seeding.
+- Editable preference deck during active redesigned sessions.
+- Hidden preference detection and end-of-game explainability.
 
-## 3. Data Model (Postgres)
+Important runtime details:
+- The frontend currently starts games in `beta` mode from `frontend/src/App.jsx`.
+- Categories need at least 100 visible items before the frontend will treat them as ready.
+- Onboarding serves a 100-item pool and allows selecting 1 to 10 items.
+- Standard rounds currently show 10 candidates.
 
-Primary tables:
+## Data Model
+
+Primary Postgres tables:
 - `products`
 - `users`
 - `games`
 - `game_rounds`
 - `prefix_ratings`
 
-Category-aware product docs include `category` and `schema_version`.
+Product records are category-aware:
+- `ProductRecord.category` stores the normalized category id.
+- `ProductRecord.data` stores the category-specific payload.
 
-Current categories:
-- `fountain_pens`
-- `movies`
+Schema and startup helpers:
+- `backend/app/services/schema_service.py`
+- `backend/app/services/ml_config.py`
+- `backend/app/services/recommender.py`
 
-Startup schema validation:
-- `backend/app/services/schema_service.py` ensures required category fields/indexes exist.
-- If products are missing `category`, startup fails and asks you to run migration.
+## Local Workflows
 
----
+### Docker-first workflow
 
-## 4. API Surface (Current)
+From the repo root:
 
-### Game APIs (primary)
-- `GET /api/game/categories`
-- `POST /api/game/start`
-- `GET /api/game/{game_id}/onboarding`
-- `POST /api/game/{game_id}/onboarding/submit`
-- `POST /api/game/{game_id}/round/start`
-- `POST /api/game/{game_id}/round/{round_number}/pick`
-- `GET /api/game/{game_id}/status`
-- `GET /api/game/{game_id}/summary`
-- `GET /api/game/leaderboard`
-- `GET /api/game/player/{player_name}/history`
+```bash
+docker compose up --build -d postgres backend
+docker compose exec backend python -m scripts.load_db
+docker compose --profile local-frontend up -d --build frontend
+```
 
-### Additional APIs (still present)
-- `/api/products`
+### Python/Node workflow
 
----
+Backend:
 
-## 5. ML / Recommendation Behavior
+```bash
+cd backend
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --host localhost --port 8015 --reload
+```
 
-Core model:
-- Prefix-based collaborative filtering with category-aware feature extraction.
-- User vector updates after onboarding and each round pick.
-- Round candidates combine high-likelihood and diversity picks.
+Frontend:
 
-Explainability:
-- AI top candidate list and reason text per round.
-- Learned preference/dislike features in final summary.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-Hidden preference pipeline:
-1. Compare learned feature weights vs selection frequency.
-2. Detect latent features not explicitly targeted.
-3. Generate hidden gem recommendations from latent dimensions.
+Notes:
+- Copy `backend/.env.example` to `backend/.env` before running locally without Docker.
+- `DATABASE_URL` must point to a working Postgres instance.
 
----
+## Script Catalog
 
-## 6. Script Catalog (What to Run and Why)
+Run from `backend/` unless noted otherwise.
 
-Run all commands below from `backend/` unless noted.
+Core scripts:
+- `python -m scripts.load_db`
+  - loads the bundled fountain pen dataset
+- `python -m scripts.ingest_movies_tmdb --max-candidates 3000 --max-rps 8`
+  - ingests movies from TMDB
+- `python -m scripts.ingest_games_igdb --max-candidates 5000`
+  - ingests games from IGDB
+- `python -m scripts.migrate_multicategory_schema`
+  - compatibility migration helper
+- `python -m scripts.evaluate_pbcf`
+  - evaluates AI performance on completed games
 
-### Required for normal clone setup
-- Load pens into Postgres:
-  - `python -m scripts.load_db`
-  - Default target is Postgres.
+Utility script:
+- `python test.py summary`
+- `python test.py list-collections`
+- `python test.py clear-games`
+- `python test.py clear-products --category movies`
+- `python test.py export-movies-json --output data/movies_export.json`
+- `python test.py export-movies-excel --output data/movies_export.csv`
 
-### Optional / advanced
-- Ingest movies from TMDB:
-  - `python -m scripts.ingest_movies_tmdb --max-candidates 30000 --max-rps 8 --no-resume`
-  - `--max-movies` is optional; if omitted, all quality-passing candidates are upserted
-  - if set, `--max-movies` becomes a final selected/upserted cap
-  - `--max-candidates` controls candidate pool breadth and runtime
-  - `--max-pages-per-lane` controls pagination depth per lane query
-  - `--max-rps` controls request pacing; retry/backoff is built in for 429/network issues
-  - `--lane-bars` shows grouped live lane progress bars in interactive terminals
-  - Uses checkpoint file: `backend/data/tmdb_ingest_checkpoint.json`
-- Ingest games from IGDB:
-  - `python -m scripts.ingest_games_igdb --max-candidates 5000`
-  - `--max-games` is optional; if omitted, all quality-passing candidates are upserted
-  - if set, `--max-games` becomes a final selected/upserted cap
-  - `--max-candidates` controls candidate pool breadth and runtime
-  - `--max-pages-per-lane` controls pagination depth per lane query
-  - `--max-rps` controls request pacing; retry/backoff is built in for 429/network issues
-  - Uses checkpoint file: `backend/data/igdb_ingest_checkpoint.json`
-- Multi-category schema migration:
-  - `python -m scripts.migrate_multicategory_schema`
-- Model evaluation reports:
-  - `python -m scripts.evaluate_pbcf`
+## Testing
 
-### Ingestion strategy summary
-For the full operational version (including Docker-first commands and VM background-run examples), see `README.md`:
-- `README.md` -> `Ingestion Strategy (TMDB + IGDB)`
+Backend tests:
 
-- TMDB lane-based candidate pool:
-  - `trending_day`, `trending_week`
-  - per-year `discover_popularity`, `discover_vote_count`, `discover_long_tail`
-  - `discover_diversity` lanes (language+decade and genre variants)
-  - `discover_classics`
-- TMDB hard quality filters:
-  - release date must not be in the future
-  - runtime >= 60 minutes
-  - poster required
-  - at least one genre
-  - `vote_count >= --min-vote-count`
-- TMDB final selection:
-  - quality score ranking on quality-passing docs
-  - optional `--max-movies` cap applies diversity balancing by decade/genre/language (with classics quota)
-- IGDB candidate lanes:
-  - `popular_hype`, `popular_rating_count`, `high_rated`, `recent_hype`
-  - `long_tail_quality`, `decade_balance`, `classics`
-- IGDB hard quality filters:
-  - release date must not be in the future
-  - cover required
-  - at least one genre and one platform
-  - `total_rating_count >= --min-rating-count`
-  - `total_rating >= --min-total-rating`
-- IGDB final selection:
-  - quality score (total rating, rating count, hypes, recency) + diversity balancing by decade/genre/platform
-  - optional `--max-games` cap after filtering
-
----
-
-## 7. Developer Workflows
-
-### First run (fresh clone)
-1. Install backend deps: `python -m pip install -r requirements.txt`
-2. Copy env file from `.env.example` to `.env`.
-3. Ensure Postgres is running.
-4. Load pens: `python -m scripts.load_db`
-5. Start backend: `python -m uvicorn app.main:app --host localhost --port 8015 --reload`
-6. In `frontend/`: `npm install && npm run dev`
-
-### Reset and reload data safely
-1. Drop relevant Postgres collections if needed.
-2. Reload pens: `python -m scripts.load_db`
-3. Optionally ingest movies again.
-
-### Resume paused movie ingest
-- Re-run same command:
-  - `python -m scripts.ingest_movies_tmdb --max-candidates 30000 --max-rps 8`
-- Script resumes from checkpoint automatically.
-- If you want a fresh pool (different target/strategy), include `--no-resume`.
-
----
-
-## 8. Testing and Validation
-
-### Backend unit tests
 ```bash
 cd backend
 python -m unittest discover -s tests -v
 ```
 
-### Backend compile sanity
+Compile sanity:
+
 ```bash
 cd backend
 python -m compileall app scripts tests
 ```
 
-### Frontend build verification
+Frontend build:
+
 ```bash
 cd frontend
 npm run build
 ```
 
-### API smoke script
-```bash
-bash test_game_api.sh
-```
+## Operational Notes
 
-Note:
-- The smoke script assumes backend is running on port `8015`.
+TMDB ingest:
+- checkpoint file: `backend/data/tmdb_ingest_checkpoint.json`
+- supports `--no-resume`
+- supports `--max-pages-per-lane`
+- supports `--lane-bars`
 
----
+IGDB ingest:
+- checkpoint file: `backend/data/igdb_ingest_checkpoint.json`
+- supports `--no-resume`
+- supports `--max-pages-per-lane`
+- supports `--detail-batch-size`
+- supports `--lane-bars`
 
-## 9. Common Issues
+Full ingestion argument reference:
+- `docs/INGESTION_GUIDE.md`
 
-### Pens not visible after clone
-Cause:
-- Postgres has no fountain pen docs yet.
-Fix:
-- Run `python -m scripts.load_db` (Postgres default).
+## Common Issues
 
-### Movie category disabled / ingest required
-Cause:
-- Fewer than 50 movie products loaded.
-Fix:
-- Complete TMDB ingest or seed enough movie docs.
+Pens not visible:
+- run `python -m scripts.load_db`
 
-### Startup error about missing `category`
-Cause:
-- Old product docs without schema/category fields.
-Fix:
-- Run `python -m scripts.migrate_multicategory_schema`.
+Category not ready in frontend:
+- the frontend expects at least 100 visible items for that category
 
-### Postgres connection failure
-Check:
-- Postgres service is running.
-- `DATABASE_URL` in `backend/.env`.
+Movie or game ingest unavailable:
+- confirm the matching API credentials exist in `backend/.env`
 
----
+Postgres connection failure:
+- verify Postgres is running
+- verify `DATABASE_URL`
 
-## 10. Limitations and Next Priorities
+## Recommended Doc Split
 
-### Current limitations
-- Recommendation quality depends on dataset size and quality.
+This file is for contributor workflows and architecture.
 
-### Recommended next steps
-1. Add API integration tests for `/api/game/*`.
-2. Add one-command bootstrap script for backend + frontend + data load.
-3. Add automated DB health/data availability check in startup diagnostics.
-4. Continue improving movie ingest completeness and operational docs.
+Use:
+- `README.md` for quick start
+- `docs/API_REFERENCE.md` for routes
+- `docs/FEATURES_GUIDE.md` for user-facing behavior
+- `docs/ADDING_DATASETS.md` for category extension
+- `docs/INGESTION_GUIDE.md` for TMDB and IGDB script flags
+- `docs/NGINX_SETUP.md` for deployment and backup notes

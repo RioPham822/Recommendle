@@ -1,96 +1,114 @@
 # Features Guide
 
-This file summarizes currently implemented features and how to use them.
+This guide summarizes the user-facing behavior implemented in the current app.
 
-## 1. User Authentication
+## Authentication
 
-Implemented endpoints:
+Implemented behavior:
+- users can register and log in
+- sessions use expiring tokens
+- each account keeps separate play history
+- the first registered account becomes an admin unless a bootstrap admin already exists
+
+Main endpoints:
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/user/{user_id}`
-- `POST /api/auth/change-password?user_id=...`
-- `POST /api/auth/logout?user_id=...&session_token=...`
+- `POST /api/auth/logout`
 
-Behavior:
-- Password hashing uses PBKDF2-SHA256.
-- Login returns expiring session token (7-day expiry).
-- Register auto-logs the user in.
+## Categories
 
-## 2. Game Flow
+Current categories:
+- `fountain_pens`
+- `movies`
+- `games`
 
-- Onboarding pool: 50 items
-- Required onboarding picks: exactly 10
-- Prefix rating required after onboarding
-- Default rounds: 5
-- Candidate set per round: 10
-- Round scoring: AI vs human
-- Final summary: learned preferences, hidden preferences, recommendations
+Frontend readiness rule:
+- the welcome screen currently treats a category as ready when it has at least 100 visible items
 
-Primary endpoints:
-- `GET /api/game/categories`
-- `POST /api/game/start`
-- `GET /api/game/{game_id}/onboarding`
-- `POST /api/game/{game_id}/onboarding/submit`
-- `POST /api/game/{game_id}/round/start`
-- `POST /api/game/{game_id}/round/{round_number}/pick`
-- `GET /api/game/{game_id}/status`
-- `GET /api/game/{game_id}/summary`
+## Gameplay Flow
+
+Current frontend flow:
+1. The player signs in.
+2. The player selects a category.
+3. The frontend starts a `beta` game session.
+4. The player can optionally seed likes and dislikes before onboarding.
+5. The player completes onboarding from a 100-item pool.
+6. The player rates the onboarding set.
+7. The player plays 5 rounds of AI-vs-human selection.
+8. The player sees a final summary and leaderboard context.
+
+Current rules:
+- onboarding pool size: 100 items
+- onboarding selections allowed: 1 to 10
+- round candidates: 10
+- total rounds: 5
+
+## Beta Features
+
+Currently implemented:
+- preference seeding before onboarding
+- negative feedback through "less like this"
+- round refresh after negative feedback
+- editable preference deck during active play
+
+Relevant endpoints:
+- `POST /api/game/{game_id}/seed`
+- `POST /api/game/{game_id}/feedback`
+- `POST /api/game/{game_id}/round/refresh`
+- `PATCH /api/game/{game_id}/preferences`
+
+## Explainability
+
+The app currently exposes:
+- AI-vs-human round results
+- per-round AI explanation payloads
+- hidden preference hints
+- final learned preference summary
+- hidden-gem recommendations
+
+## Leaderboards And History
+
+Implemented:
+- category-scoped leaderboard
+- per-player history by category
+- resume-state lookup for unfinished runs
+
+Relevant endpoints:
 - `GET /api/game/leaderboard`
 - `GET /api/game/player/{player_name}/history`
+- `GET /api/game/resume-state`
 
-## 3. Data Utilities
+## Admin Features
 
-### Dataset loading
-From repo root:
+Admin capabilities exposed by the backend and frontend:
+- inspect current admin identity
+- list users
+- inspect per-user ML stats
+- clear a user's progress
+- delete a user
+- inspect and export category product catalogs
+- view and update ML config values
+
+## Data Utilities
+
+Common commands:
 
 ```bash
 docker compose exec backend python -m scripts.load_db
-```
-
-Optional movie ingestion:
-
-```bash
 docker compose exec backend python -m scripts.ingest_movies_tmdb --max-candidates 3000 --max-rps 8
+docker compose exec backend python -m scripts.ingest_games_igdb --max-candidates 5000
+docker compose exec backend python test.py summary
+docker compose exec backend python test.py clear-products --category movies
+docker compose exec backend python test.py export-movies-excel --output data/movies_export.csv
 ```
 
-`--max-movies` is optional if you want to cap final upserts.
-For a fresh ingest strategy/target, add `--no-resume`.
+## Frontend Runtime Config
 
-### Local DB utility
-From `backend/`:
+The frontend reads its API base URL from `VITE_API_BASE_URL`.
 
-```bash
-python test.py summary
-python test.py list-collections
-python test.py clear-games
-python test.py clear-products --category movies
-```
-
-## 4. Backup/Restore
-
-Backup from Docker Postgres to local file:
-
-```bash
-docker compose exec -T postgres pg_dump -U decidio -d decidio -Fc > decidio.db
-```
-
-Restore directly into live DB:
-
-```bash
-docker compose exec -T postgres pg_restore -U decidio -d decidio --clean --if-exists < decidio.db
-```
-
-If restore reports constraint/index conflicts, use schema reset + restore flow documented in `docs/NGINX_SETUP.md`.
-
-## 5. Frontend API URL
-
-Frontend reads API base from `VITE_API_BASE_URL`.
-
-Current compose default:
+Compose default:
 
 ```yaml
 VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8015}
 ```
-
-- For local frontend: fallback works.
-- For hosted frontend (Render): set `VITE_API_BASE_URL` to public HTTPS backend URL.
