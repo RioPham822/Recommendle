@@ -15,8 +15,9 @@ Users making a sequence of related product decisions (for example, choosing a se
 - Web-based interactive preference game
 - Sequential preference modeling using user picks over multiple rounds
 - Feature-aware recommendation and prediction
-- Category-based product catalogs (currently fountain pens; movies supported with ingestion)
+- Category-based product catalogs (currently fountain pens, movies, and games)
 - Hidden preference detection and explainable summary
+- Account-based authentication and admin tooling
 
 ### Out of Scope (Current Product)
 - Native mobile app
@@ -34,8 +35,8 @@ Status legend:
 |---|---|---|
 | FR-01 | The system shall maintain a product catalog for at least one domain and support expansion to multiple categories. | Implemented |
 | FR-02 | The system shall allow a user to start a new session/game with player name and category selection. | Implemented |
-| FR-03 | The system shall present an onboarding pool of 50 candidate items for the chosen category. | Implemented |
-| FR-04 | The system shall require exactly 10 onboarding selections before proceeding. | Implemented |
+| FR-03 | The system shall present an onboarding pool of 100 candidate items for the chosen category. | Implemented |
+| FR-04 | The system shall allow 1 to 10 onboarding selections before proceeding. | Implemented |
 | FR-05 | The system shall collect a set-level prefix rating after onboarding (coherence rating of selected set). | Implemented |
 | FR-06 | The system shall run sequential rounds (currently 5) where the user picks one item from generated candidates (currently 10). | Implemented |
 | FR-07 | The AI model shall update user preference state after each choice and generate the next round candidates. | Implemented |
@@ -47,6 +48,8 @@ Status legend:
 | FR-13 | The system shall maintain a leaderboard of completed sessions, filterable by category. | Implemented |
 | FR-14 | The system shall show per-player historical performance and drill-down details for past games. | Implemented |
 | FR-15 | The system shall provide data ingestion tooling for category datasets (scrape/load/migrate/ingest). | Implemented |
+| FR-15a | The system shall support pre-onboarding preference seeding and negative feedback in beta-mode sessions. | Implemented |
+| FR-15b | The system shall allow admin users to inspect users, catalogs, and ML configuration. | Implemented |
 | FR-16 | The system shall support preference exceptions/inversions (user likes an item that violates usual pattern). | Partial |
 | FR-17 | The system shall provide explicit swipe/right-brain vs swipe/left-brain navigation mechanics. | Partial |
 | FR-18 | The system shall allow users to reorder chosen items as an input signal for preference strength. | Planned |
@@ -63,7 +66,7 @@ Status legend:
 | NFR-05 | Data integrity: Product identity and core fields shall remain consistent under ingestion/migration. | Implemented via schema migration and DB indexes. |
 | NFR-06 | Testability: Core model and service behavior shall be verifiable through automated tests/scripts. | Implemented (backend tests + evaluation tooling). |
 | NFR-07 | Accessibility baseline: Inputs shall have labels, keyboard-usable controls, and visible feedback. | Implemented baseline; full WCAG audit pending. |
-| NFR-08 | Portability: System shall run in local development on standard academic/dev machines. | Implemented (Python + Node + Postgres local stack). |
+| NFR-08 | Portability: System shall run in local development on standard academic/dev machines. | Implemented (Docker-first flow plus Python/Node + Postgres local stack). |
 | NFR-09 | Visual adaptability: UI shall support both light and dark themes. | Implemented. |
 | NFR-10 | Privacy baseline: System shall minimize personal data collected during gameplay. | Implemented (player name + gameplay data only). |
 
@@ -76,8 +79,8 @@ Status legend:
 - Backend: Python + FastAPI
 - Frontend: React + Vite
 - Database: Postgres (local/default expected in docs)
-- Runtime prerequisites: Python 3.10+, Node 18+, local Postgres instance
-- Category must have sufficient inventory (50 items minimum) to start a game flow
+- Runtime prerequisites: Python 3.10+, Node 18+, and Postgres or Docker
+- Category must have sufficient visible inventory for gameplay; the current frontend expects at least 100 visible items
 
 ### 6.3 Data / Integration Constraints
 - Movie ingestion requires a valid TMDB API key and adheres to TMDB API usage limits/terms.
@@ -103,4 +106,3 @@ From the sponsor document:
 3. Add named persistent user collections/profiles with auth (FR-20).
 4. Define measurable API/UI performance targets and success criteria (NFR-02).
 5. Add formal evaluation benchmarks with target thresholds per category.
-

@@ -7,59 +7,51 @@ export default function AuthScreen({
   loading,
   error,
 }) {
-  const [mode, setMode] = useState('login'); // 'login' or 'register'
+  const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [localError, setLocalError] = useState(null);
+  const [localError, setLocalError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLocalError(null);
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLocalError('');
 
-    // Validation
     if (!username.trim()) {
-      setLocalError('Username is required');
+      setLocalError('Username is required.');
       return;
     }
-    if (username.length < 3) {
-      setLocalError('Username must be at least 3 characters');
+    if (username.trim().length < 3) {
+      setLocalError('Username must be at least 3 characters.');
       return;
     }
     if (!password) {
-      setLocalError('Password is required');
+      setLocalError('Password is required.');
       return;
     }
     if (password.length < 6) {
-      setLocalError('Password must be at least 6 characters');
+      setLocalError('Password must be at least 6 characters.');
       return;
     }
-
     if (mode === 'register') {
-      if (password !== confirmPassword) {
-        setLocalError('Passwords do not match');
+      if (!displayName.trim()) {
+        setLocalError('Display name is required.');
         return;
       }
-      if (!displayName.trim()) {
-        setLocalError('Display name is required');
+      if (password !== confirmPassword) {
+        setLocalError('Passwords do not match.');
         return;
       }
     }
 
     setIsLoading(true);
-
     try {
       const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
-      const payload =
-        mode === 'login'
-          ? { username: username.trim(), password }
-          : {
-              username: username.trim(),
-              password,
-              display_name: displayName.trim(),
-            };
+      const payload = mode === 'login'
+        ? { username: username.trim(), password }
+        : { username: username.trim(), password, display_name: displayName.trim() };
 
       const response = await fetch(
         `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8015'}${endpoint}`,
@@ -67,164 +59,147 @@ export default function AuthScreen({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-        }
+        },
       );
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(errorData.detail || 'Authentication failed');
+        const errorPayload = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(errorPayload.detail || 'Authentication failed.');
       }
 
       const data = await response.json();
-
-      // Store auth info
       localStorage.setItem('userId', data.user_id);
       localStorage.setItem('sessionToken', data.session_token);
       localStorage.setItem('displayName', data.display_name);
       localStorage.setItem('username', data.username);
+      localStorage.setItem('userRole', data.role || 'player');
       localStorage.setItem('tokenExpiry', data.expires_at);
 
-      // Call success callback
       onLoginSuccess({
         userId: data.user_id,
         username: data.username,
+        role: data.role || 'player',
         displayName: data.display_name,
         sessionToken: data.session_token,
       });
-    } catch (err) {
-      setLocalError(err.message);
+    } catch (submissionError) {
+      setLocalError(submissionError.message || 'Authentication failed.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
   const displayError = localError || error;
 
+  function resetMode(nextMode) {
+    setMode(nextMode);
+    setUsername('');
+    setPassword('');
+    setConfirmPassword('');
+    setDisplayName('');
+    setLocalError('');
+  }
+
   return (
     <section className="screen shell auth-screen">
-      <div className="auth-container">
-        <div className="auth-box">
-          <div className="auth-header">
-            <img src={logoSrc} alt="Recommendle" className="auth-logo" />
-            <h1>{mode === 'login' ? 'Welcome Back' : 'Join the Game'}</h1>
-            <p className="auth-subtitle">
+      <div className="auth-screen__stage">
+        <div className="auth-screen__copy">
+          <img src={logoSrc} alt="Recommendle" className="auth-screen__logo" />
+          <p className="eyebrow">Train the model</p>
+          <h1>Can AI read your mind?</h1>
+          <p className="auth-screen__lede">
+            Build your taste profile, tune the AI with a few signals up front, and see how quickly it learns to choose like you.
+          </p>
+        </div>
+
+        <div className="auth-card">
+          <div className="auth-card__header">
+            <h2>{mode === 'login' ? 'Sign in' : 'Create account'}</h2>
+            <p>
               {mode === 'login'
-                ? 'Sign in to your account to play'
-                : 'Create your account to start playing'}
+                ? 'Pick up where you left off.'
+                : 'Your saved runs and leaderboard history stay tied to this account.'}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form">
             {displayError && <div className="auth-error">{displayError}</div>}
 
-            <div className="form-group">
-              <label htmlFor="username">Username</label>
+            <label className="auth-field">
+              <span>Username</span>
               <input
-                id="username"
                 type="text"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Choose a unique username"
-                disabled={isLoading || loading}
-                minLength={3}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="your-name"
                 maxLength={80}
+                minLength={3}
+                disabled={isLoading || loading}
               />
-              <small>3-80 characters</small>
-            </div>
+            </label>
 
             {mode === 'register' && (
-              <div className="form-group">
-                <label htmlFor="display-name">Display Name</label>
+              <label className="auth-field">
+                <span>Display name</span>
                 <input
-                  id="display-name"
                   type="text"
                   value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Name shown on leaderboards"
-                  disabled={isLoading || loading}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="What shows on the leaderboard"
                   maxLength={100}
+                  disabled={isLoading || loading}
                 />
-                <small>How you appear to other players</small>
-              </div>
+              </label>
             )}
 
-            <div className="form-group">
-              <label htmlFor="password">Password</label>
+            <label className="auth-field">
+              <span>Password</span>
               <input
-                id="password"
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Create a secure password"
-                disabled={isLoading || loading}
-                minLength={6}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="At least 6 characters"
                 maxLength={200}
+                minLength={6}
+                disabled={isLoading || loading}
               />
-              <small>At least 6 characters</small>
-            </div>
+            </label>
 
             {mode === 'register' && (
-              <div className="form-group">
-                <label htmlFor="confirm-password">Confirm Password</label>
+              <label className="auth-field">
+                <span>Confirm password</span>
                 <input
-                  id="confirm-password"
                   type="password"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
                   placeholder="Re-enter your password"
-                  disabled={isLoading || loading}
-                  minLength={6}
                   maxLength={200}
+                  minLength={6}
+                  disabled={isLoading || loading}
                 />
-              </div>
+              </label>
             )}
 
-            <button
-              type="submit"
-              disabled={isLoading || loading}
-              className="auth-submit-button"
-            >
-              {isLoading || loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            <button type="submit" className="auth-submit-button" disabled={isLoading || loading}>
+              {isLoading || loading
+                ? 'Processing...'
+                : mode === 'login'
+                  ? 'Enter Recommendle'
+                  : 'Create account'}
             </button>
           </form>
 
-          <div className="auth-toggle">
-            <p>
-              {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode(mode === 'login' ? 'register' : 'login');
-                  setLocalError(null);
-                  setUsername('');
-                  setPassword('');
-                  setConfirmPassword('');
-                  setDisplayName('');
-                }}
-                disabled={isLoading || loading}
-                className="toggle-button"
-              >
-                {mode === 'login' ? 'Sign Up' : 'Sign In'}
-              </button>
-            </p>
+          <div className="auth-card__toggle">
+            <span>{mode === 'login' ? "Need an account?" : 'Already have an account?'}</span>
+            <button
+              type="button"
+              className="toggle-button"
+              onClick={() => resetMode(mode === 'login' ? 'register' : 'login')}
+              disabled={isLoading || loading}
+            >
+              {mode === 'login' ? 'Sign up' : 'Sign in'}
+            </button>
           </div>
-
-          <div className="auth-info">
-            <h3>🎮 How it works:</h3>
-            <ul>
-              <li>Create an account or sign in</li>
-              <li>Pick a category and rate 10 items</li>
-              <li>Battle AI in 5 rounds of predictions</li>
-              <li>Your scores are saved to your account</li>
-              <li>Compete on the leaderboard</li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="auth-background">
-          <div className="background-shape shape-1"></div>
-          <div className="background-shape shape-2"></div>
-          <div className="background-shape shape-3"></div>
         </div>
       </div>
     </section>

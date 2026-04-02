@@ -1,9 +1,11 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8015').replace(/\/$/, '');
 
 async function request(path, options = {}) {
+  const authHeaders = getAuthHeaders();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
       ...(options.headers || {}),
     },
     ...options,
@@ -50,6 +52,118 @@ export async function getUser(userId) {
   return request(`/api/auth/user/${userId}`);
 }
 
+export async function getAdminMe() {
+  return request('/api/admin/me');
+}
+
+export async function listAdminUsers() {
+  return request('/api/admin/users');
+}
+
+export async function getAdminUserMlStats(userId) {
+  return request(`/api/admin/users/${userId}/ml-stats`);
+}
+
+export async function deleteAdminUser(userId) {
+  const response = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // Ignore JSON parsing errors; use status text.
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+export async function clearAdminUserProgress(userId) {
+  const response = await fetch(`${API_BASE}/api/admin/users/${userId}/progress/clear`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // Ignore JSON parsing errors; use status text.
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+export async function getAdminMlConfig() {
+  return request('/api/admin/ml-config');
+}
+
+export async function updateAdminMlConfig(values) {
+  return request('/api/admin/ml-config', {
+    method: 'PATCH',
+    body: JSON.stringify({ values }),
+  });
+}
+
+export async function listAdminCategories() {
+  return request('/api/admin/categories');
+}
+
+export async function listAdminProducts({
+  category,
+  search = '',
+  filters = {},
+  limit = 100,
+  offset = 0,
+  sortField = 'title',
+  sortDir = 'asc',
+}) {
+  const params = new URLSearchParams({
+    category,
+    limit: String(limit),
+    offset: String(offset),
+    sort_field: sortField,
+    sort_dir: sortDir,
+  });
+  if (search) params.set('search', search);
+  if (filters && Object.keys(filters).length > 0) params.set('filters', JSON.stringify(filters));
+  return request(`/api/admin/products?${params.toString()}`);
+}
+
+export async function exportAdminProducts({ category, search = '', filters = {} }) {
+  const params = new URLSearchParams({ category });
+  if (search) params.set('search', search);
+  if (filters && Object.keys(filters).length > 0) params.set('filters', JSON.stringify(filters));
+  const response = await fetch(`${API_BASE}/api/admin/products/export?${params.toString()}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // Ignore JSON parsing errors; use status text.
+    }
+    throw new Error(detail);
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${category}-products-export.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export async function changePassword(userId, oldPassword, newPassword, sessionToken) {
   return request('/api/auth/change-password', {
     method: 'POST',
@@ -64,21 +178,21 @@ export async function changePassword(userId, oldPassword, newPassword, sessionTo
 }
 
 export async function logoutUser(userId, sessionToken) {
-  return request('/api/auth/logout', {
+  const params = new URLSearchParams({
+    user_id: userId,
+    session_token: sessionToken,
+  });
+  return request(`/api/auth/logout?${params.toString()}`, {
     method: 'POST',
-    body: JSON.stringify({
-      user_id: userId,
-      session_token: sessionToken,
-    }),
   });
 }
 
 // ============ GAME ENDPOINTS ============
 
-export async function startGame(playerName, category = 'fountain_pens', freshStart = false) {
+export async function startGame(playerName, category = 'fountain_pens', freshStart = false, mode = 'classic') {
   return request('/api/game/start', {
     method: 'POST',
-    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart }),
+    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart, mode }),
   });
 }
 
@@ -106,16 +220,59 @@ export async function submitOnboarding(gameId, selectedProductIds, rating) {
   });
 }
 
+export async function submitSeedPreferences(gameId, likes = {}, dislikes = {}, likeProductIds = [], dislikeProductIds = []) {
+  return request(`/api/game/${gameId}/seed`, {
+    method: 'POST',
+    body: JSON.stringify({
+      likes,
+      dislikes,
+      like_product_ids: likeProductIds,
+      dislike_product_ids: dislikeProductIds,
+    }),
+  });
+}
+
+export async function searchProducts(query, category = 'movies', limit = 12, fuzzy = true) {
+  const params = new URLSearchParams({
+    q: query,
+    category,
+    limit: String(limit),
+    fuzzy: fuzzy ? 'true' : 'false',
+  });
+  return request(`/api/products/search?${params.toString()}`);
+}
+
 export async function startRound(gameId) {
   return request(`/api/game/${gameId}/round/start`, {
     method: 'POST',
   });
 }
 
-export async function submitRoundPick(gameId, roundNumber, productId) {
+export async function refreshRound(gameId, lessLikeIds = []) {
+  return request(`/api/game/${gameId}/round/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({ less_like_ids: lessLikeIds }),
+  });
+}
+
+export async function submitRoundPick(gameId, roundNumber, productId, lessLikeIds = []) {
   return request(`/api/game/${gameId}/round/${roundNumber}/pick`, {
     method: 'POST',
-    body: JSON.stringify({ product_id: productId }),
+    body: JSON.stringify({ product_id: productId, less_like_ids: lessLikeIds }),
+  });
+}
+
+export async function updatePreferences(gameId, activePreferenceIds = []) {
+  return request(`/api/game/${gameId}/preferences`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active_preference_ids: activePreferenceIds }),
+  });
+}
+
+export async function submitGameFeedback(gameId, productId, action = 'less_like_this') {
+  return request(`/api/game/${gameId}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ product_id: productId, action }),
   });
 }
 
@@ -168,6 +325,23 @@ export function getUsername() {
   return localStorage.getItem('username');
 }
 
+export function getUserRole() {
+  return localStorage.getItem('userRole');
+}
+
+export function getAuthHeaders() {
+  const token = getAuthToken();
+  const userId = getUserId();
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (userId) {
+    headers['X-User-Id'] = userId;
+  }
+  return headers;
+}
+
 export function isTokenExpired() {
   const expiry = localStorage.getItem('tokenExpiry');
   if (!expiry) return true;
@@ -179,5 +353,6 @@ export function clearAuthData() {
   localStorage.removeItem('sessionToken');
   localStorage.removeItem('displayName');
   localStorage.removeItem('username');
+  localStorage.removeItem('userRole');
   localStorage.removeItem('tokenExpiry');
 }

@@ -22,6 +22,9 @@ class ProductCard(BaseModel):
     meta_badges: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     image_url: str | None = None
+    description: str | None = None
+    url: str | None = None
+    predicted_match_features: list[str] = Field(default_factory=list)
 
 
 class MetricsOut(BaseModel):
@@ -36,6 +39,7 @@ class GameCreate(BaseModel):
 
     player_name: str = Field(..., min_length=1, max_length=80)
     category: str = Field(default="fountain_pens")
+    mode: str = Field(default="classic")
     fresh_start: bool = Field(default=False)
 
 
@@ -43,12 +47,18 @@ class GameOut(BaseModel):
     """API response after game creation."""
 
     id: str
+    schema_version: int = 2
     player_name: str
     category: str = "fountain_pens"
+    mode: str = "classic"
     status: str
     total_rounds: int
     human_score: int
     ai_score: int
+    current_match_streak: int = 0
+    longest_match_streak: int = 0
+    match_streak_target: int = 5
+    rounds_played: int = 0
     created_at: datetime
     resumed: bool = False
 
@@ -73,6 +83,8 @@ class OnboardingOut(BaseModel):
     category: str = "fountain_pens"
     pool_size: int
     category_copy: dict[str, str] = Field(default_factory=dict)
+    display_schema: dict[str, Any] = Field(default_factory=dict)
+    preference_deck: list[ProductCard] = Field(default_factory=list)
     products: list[ProductCard]
 
 
@@ -97,7 +109,16 @@ class RoundStartOut(BaseModel):
 
     round_number: int
     category: str = "fountain_pens"
+    round_mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
+    display_schema: dict[str, Any] = Field(default_factory=dict)
+    preference_deck: list[ProductCard] = Field(default_factory=list)
+    current_match_streak: int = 0
+    longest_match_streak: int = 0
+    match_streak_target: int = 5
+    rounds_played: int = 0
+    round_intro_title: str = ""
+    round_intro_body: str = ""
     candidates: list[ProductCard]
     pre_round_metrics: MetricsOut
 
@@ -106,6 +127,43 @@ class RoundPickSubmit(BaseModel):
     """Payload for submitting one pick in a round."""
 
     product_id: str
+    less_like_ids: list[str] = Field(default_factory=list)
+
+
+class RoundRefreshSubmit(BaseModel):
+    """Payload for refreshing a round with optional less-like selections."""
+
+    less_like_ids: list[str] = Field(default_factory=list)
+
+
+class FeedbackSubmit(BaseModel):
+    """Payload for in-game feedback (beta mode)."""
+
+    product_id: str
+    action: str
+
+
+class FeedbackOut(BaseModel):
+    """Result after feedback is accepted."""
+
+    accepted: bool
+    action: str
+    product_id: str
+
+
+class SeedPreferencesSubmit(BaseModel):
+    """Payload for seeding beta preferences before onboarding."""
+
+    likes: dict[str, list[str]] = Field(default_factory=dict)
+    dislikes: dict[str, list[str]] = Field(default_factory=dict)
+    like_product_ids: list[str] = Field(default_factory=list)
+    dislike_product_ids: list[str] = Field(default_factory=list)
+
+
+class SeedPreferencesOut(BaseModel):
+    """Result after seed preferences are accepted."""
+
+    accepted: bool
 
 
 class ScoredProductCard(ProductCard):
@@ -124,6 +182,7 @@ class AIExplanation(BaseModel):
     shared_features: list[str] = Field(default_factory=list)
     hidden_preferences: list[list] = Field(default_factory=list)
     hidden_preference_hints: list[str] = Field(default_factory=list)
+    current_match_features: list[str] = Field(default_factory=list)
 
 
 class RoundResultOut(BaseModel):
@@ -131,13 +190,21 @@ class RoundResultOut(BaseModel):
 
     round_number: int
     category: str = "fountain_pens"
+    round_mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
+    preference_deck: list[ProductCard] = Field(default_factory=list)
     human_pick: ProductCard
     ai_pick: ScoredProductCard
     ai_correct: bool
     ai_exact: bool = False
     ai_rank_of_pick: int = 1
     ai_top3_ids: list[str] = Field(default_factory=list)
+    ai_top5_ids: list[str] = Field(default_factory=list)
+    preference_match: bool = False
+    current_match_streak: int = 0
+    longest_match_streak: int = 0
+    match_streak_target: int = 5
+    rounds_played: int = 0
     human_points: int
     ai_points: int
     total_human_score: int
@@ -158,6 +225,8 @@ class RoundStatOut(BaseModel):
     predicted_rating: float = 3.0
     cumulative_ai: int = 0
     cumulative_human: int = 0
+    preference_match: bool = False
+    current_match_streak: int = 0
 
 
 class AccuracySummary(BaseModel):
@@ -173,12 +242,20 @@ class GameSummaryOut(BaseModel):
     """Final summary payload for a completed game."""
 
     game_id: str
+    schema_version: int = 2
     player_name: str
     category: str = "fountain_pens"
+    mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
     total_rounds: int
     human_score: int
     ai_score: int
+    rounds_played: int = 0
+    total_matches: int = 0
+    match_rate: float = 0.0
+    current_match_streak: int = 0
+    longest_match_streak: int = 0
+    match_streak_target: int = 5
     accuracy: AccuracySummary
     round_stats: list[RoundStatOut]
     learned_preferences: list[list] = Field(default_factory=list)
@@ -193,14 +270,21 @@ class GameStatusOut(BaseModel):
     """Current game status payload."""
 
     id: str
+    schema_version: int = 2
     player_name: str
     category: str = "fountain_pens"
+    mode: str = "classic"
     category_copy: dict[str, str] = Field(default_factory=dict)
     status: str
     current_round: int
     total_rounds: int
     human_score: int
     ai_score: int
+    preference_deck: list[ProductCard] = Field(default_factory=list)
+    current_match_streak: int = 0
+    longest_match_streak: int = 0
+    match_streak_target: int = 5
+    rounds_played: int = 0
     onboarding_complete: bool
     onboarding_selected_count: int
     round_in_progress: int | None = None
@@ -210,12 +294,16 @@ class LeaderboardEntry(BaseModel):
     """Single leaderboard row."""
 
     rank: int
+    schema_version: int = 2
     player_name: str
     category: str = "fountain_pens"
     human_score: int
     ai_score: int
     score_difference: int
     rounds_completed: int
+    rounds_to_complete: int = 0
+    longest_match_streak: int = 0
+    match_rate: float = 0.0
     created_at: datetime
 
 
@@ -223,6 +311,7 @@ class PlayerGameEntry(BaseModel):
     """Single historical game row for a player."""
 
     game_id: str
+    schema_version: int = 2
     player_name: str
     category: str = "fountain_pens"
     human_score: int
@@ -230,6 +319,9 @@ class PlayerGameEntry(BaseModel):
     score_difference: int
     rounds_played: int
     ai_accuracy: float
+    rounds_to_complete: int = 0
+    longest_match_streak: int = 0
+    match_rate: float = 0.0
     created_at: datetime
 
 
@@ -241,3 +333,25 @@ class CategoryOut(BaseModel):
     item_singular: str
     item_plural: str
     available_count: int
+
+
+class PreferenceUpdateSubmit(BaseModel):
+    """Payload for editing the active preference deck."""
+
+    active_preference_ids: list[str]
+
+
+class PreferenceUpdateOut(BaseModel):
+    """Result after rebuilding a game's active preference deck."""
+
+    game_id: str
+    schema_version: int = 3
+    category: str = "fountain_pens"
+    category_copy: dict[str, str] = Field(default_factory=dict)
+    display_schema: dict[str, Any] = Field(default_factory=dict)
+    preference_deck: list[ProductCard] = Field(default_factory=list)
+    current_match_streak: int = 0
+    longest_match_streak: int = 0
+    match_streak_target: int = 5
+    rounds_played: int = 0
+    round: RoundStartOut | None = None

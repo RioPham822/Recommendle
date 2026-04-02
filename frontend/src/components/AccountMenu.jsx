@@ -1,80 +1,91 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded';
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
+import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
+import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
 import './AccountMenu.css';
 
 export default function AccountMenu({
   displayName,
   username,
+  isAdmin,
+  onOpenAdmin,
   onLogout,
   loading,
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const menuRef = useRef(null);
 
-  const handleLogout = () => {
-    setIsOpen(false);
-    onLogout();
-  };
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
 
   return (
-    <div className="account-menu-container">
+    <div className="account-menu-container" ref={menuRef}>
       <button
-        className="account-button"
-        onClick={() => setIsOpen(!isOpen)}
-        title="Account menu"
+        type="button"
+        className={`icon-button account-button ${isOpen ? 'open' : ''}`}
+        onClick={() => setIsOpen((prev) => !prev)}
+        title="Account"
+        aria-label="Open account menu"
+        aria-expanded={isOpen}
         disabled={loading}
       >
-        <span className="account-icon">👤</span>
-        <span className="account-name">{displayName}</span>
-        <span className={`account-chevron ${isOpen ? 'open' : ''}`}>▼</span>
+        <PersonOutlineRoundedIcon fontSize="small" />
+        <ExpandMoreRoundedIcon fontSize="small" />
       </button>
 
       {isOpen && (
         <div className="account-menu">
-          <div className="account-info">
-            <p className="account-info-name">{displayName}</p>
-            <p className="account-info-username">@{username}</p>
+          <div className="account-menu__identity">
+            <p className="account-menu__name">{displayName}</p>
+            <p className="account-menu__username">@{username}</p>
           </div>
-
-          <div className="account-divider"></div>
-
+          {isAdmin && (
+            <button
+              type="button"
+              className="account-menu__item"
+              onClick={() => {
+                setIsOpen(false);
+                onOpenAdmin();
+              }}
+              disabled={loading}
+            >
+              <AdminPanelSettingsRoundedIcon fontSize="small" />
+              <span>Admin workspace</span>
+            </button>
+          )}
           <button
-            className="account-menu-item logout-item"
-            onClick={() => setShowLogoutConfirm(true)}
+            type="button"
+            className="account-menu__item"
+            onClick={() => {
+              setIsOpen(false);
+              onLogout();
+            }}
             disabled={loading}
           >
-            <span>🚪</span>
-            <span>Sign Out</span>
+            <LogoutRoundedIcon fontSize="small" />
+            <span>Sign out</span>
           </button>
-
-          {showLogoutConfirm && (
-            <div className="logout-confirm">
-              <p>Sign out?</p>
-              <div className="logout-confirm-buttons">
-                <button
-                  onClick={handleLogout}
-                  disabled={loading}
-                  className="confirm-yes"
-                >
-                  Yes
-                </button>
-                <button
-                  onClick={() => setShowLogoutConfirm(false)}
-                  disabled={loading}
-                  className="confirm-no"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
         </div>
-      )}
-
-      {isOpen && (
-        <div
-          className="account-menu-backdrop"
-          onClick={() => setIsOpen(false)}
-        ></div>
       )}
     </div>
   );
