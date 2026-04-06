@@ -15,6 +15,8 @@ export default function OnboardingGrid({
   selectedIds,
   onToggle,
   onOpenRating,
+  onRefresh,
+  refreshing = false,
   mode,
   categoryCopy = {},
   seedPreferences = null,
@@ -89,6 +91,9 @@ export default function OnboardingGrid({
               <strong>{selectedIds.length}</strong>
               <span>{`1-${MAX_ONBOARDING_SELECTIONS} allowed`}</span>
             </div>
+            <button type="button" className="ghost" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? 'Refreshing...' : 'Refresh products'}
+            </button>
             <button type="button" onClick={onOpenRating} disabled={selectedIds.length < MIN_ONBOARDING_SELECTIONS}>
               Continue
             </button>

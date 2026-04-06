@@ -39,6 +39,64 @@ class GamePlayMixin:
     MIN_ONBOARDING_SELECTIONS = 1
     MAX_ONBOARDING_SELECTIONS = 10
 
+    async def _build_onboarding_pool(
+        self,
+        db: AsyncSession,
+        game: dict[str, Any],
+        category: str,
+        *,
+        preserved_ids: list[str] | None = None,
+        force_refresh: bool = False,
+    ) -> list[str]:
+        """Return an onboarding pool, optionally regenerating it while preserving chosen IDs."""
+        preserved_ids = list(dict.fromkeys(str(pid) for pid in (preserved_ids or []) if str(pid)))
+        if len(preserved_ids) > self.MAX_ONBOARDING_SELECTIONS:
+            raise ValueError(
+                f"You can preserve at most {self.MAX_ONBOARDING_SELECTIONS} onboarding selections"
+            )
+
+        pool_ids = list(game.get("onboarding_pool_ids") or [])
+        if pool_ids and not force_refresh:
+            if all(pid in pool_ids for pid in preserved_ids):
+                return pool_ids
+
+        all_products = await self._all_products_for_onboarding_sample(db, category)
+        target_size = int(get_category_profile(category).onboarding_pool_size or 100)
+        available_ids = {str(product["_id"]) for product in all_products}
+        if any(pid not in available_ids for pid in preserved_ids):
+            raise ValueError("One or more selected onboarding products are no longer available")
+
+        previous_pool_ids = list(game.get("onboarding_pool_ids") or [])
+        previous_non_preserved = set(previous_pool_ids) - set(preserved_ids)
+        candidate_products = list(all_products)
+        if force_refresh and previous_non_preserved:
+            refreshed_candidates = [
+                product for product in all_products if str(product["_id"]) not in previous_non_preserved
+            ]
+            if len(refreshed_candidates) >= max(1, target_size - len(preserved_ids)):
+                candidate_products = refreshed_candidates
+
+        mode = str(game.get("mode") or "classic").lower()
+        if mode == "beta":
+            model = await self._ensure_model(db)
+            state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
+            self._align_state_to_feature_space(model, state)
+            has_seed = bool(state.get("seeded"))
+            has_signal = any(abs(v) > 0.01 for v in state.get("user_vec", []))
+            if has_seed or has_signal:
+                pool_ids = self._seeded_onboarding_sample(candidate_products, str(game["_id"]), category, model, state)
+            else:
+                pool_ids = self._diverse_onboarding_sample(candidate_products, str(game["_id"]), category)
+        else:
+            pool_ids = self._diverse_onboarding_sample(candidate_products, str(game["_id"]), category)
+
+        remaining_ids = [pid for pid in pool_ids if pid not in preserved_ids]
+        pool_ids = (preserved_ids + remaining_ids)[:target_size]
+        if len(pool_ids) < target_size:
+            extras = [str(product["_id"]) for product in all_products if str(product["_id"]) not in set(pool_ids)]
+            pool_ids.extend(extras[: target_size - len(pool_ids)])
+        return pool_ids
+
     async def get_onboarding(self, db: AsyncSession, game_id: str) -> dict[str, Any]:
         """Return or create the onboarding pool for a game."""
         game = await self._get_game(db, game_id)
@@ -46,27 +104,61 @@ class GamePlayMixin:
         if game.get("status") == "completed":
             raise ValueError("Game is already completed")
 
-        pool_ids = game.get("onboarding_pool_ids") or []
-        if not pool_ids:
-            all_products = await self._all_products_for_onboarding_sample(db, category)
-            mode = str(game.get("mode") or "classic").lower()
-            if mode == "beta":
-                model = await self._ensure_model(db)
-                state = self._ensure_redesign_state(game.get("model_state") or model.init_state())
-                self._align_state_to_feature_space(model, state)
-                has_seed = bool(state.get("seeded"))
-                has_signal = any(abs(v) > 0.01 for v in state.get("user_vec", []))
-                if has_seed or has_signal:
-                    pool_ids = self._seeded_onboarding_sample(all_products, game_id, category, model, state)
-                else:
-                    pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
-            else:
-                pool_ids = self._diverse_onboarding_sample(all_products, game_id, category)
+        pool_ids = await self._build_onboarding_pool(db, game, category)
+        if pool_ids != (game.get("onboarding_pool_ids") or []):
             game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
             if game_row:
                 game_row.onboarding_pool_ids = pool_ids
                 game_row.updated_at = datetime.utcnow()
                 await db.commit()
+
+        await self._warm_scoring_catalog(db, category)
+
+        products = await self._get_products_by_ids(
+            db,
+            pool_ids,
+            projection=self._card_projection(category),
+        )
+
+        return {
+            "game_id": game_id,
+            "category": category,
+            "category_copy": category_copy(category),
+            "display_schema": category_display_schema(category),
+            "preference_deck": await self._preference_deck(db, game),
+            "pool_size": len(products),
+            "products": [self._product_card(p, category) for p in products],
+        }
+
+    async def refresh_onboarding(
+        self,
+        db: AsyncSession,
+        game_id: str,
+        *,
+        selected_product_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Regenerate the onboarding pool while keeping current selections available."""
+        game = await self._get_game(db, game_id)
+        category = self._game_category(game)
+        if game.get("status") != "onboarding":
+            raise ValueError("Onboarding refresh is only available before onboarding is submitted")
+        if game.get("onboarding_selected_ids"):
+            raise ValueError("Onboarding already submitted for this game")
+
+        selected_product_ids = list(dict.fromkeys(str(pid) for pid in (selected_product_ids or []) if str(pid)))
+        pool_ids = await self._build_onboarding_pool(
+            db,
+            game,
+            category,
+            preserved_ids=selected_product_ids,
+            force_refresh=True,
+        )
+
+        game_row = await db.scalar(select(GameRecord).where(GameRecord.id == str(game["_id"])))
+        if game_row:
+            game_row.onboarding_pool_ids = pool_ids
+            game_row.updated_at = datetime.utcnow()
+            await db.commit()
 
         await self._warm_scoring_catalog(db, category)
 
