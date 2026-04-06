@@ -95,6 +95,12 @@ class OnboardingSubmit(BaseModel):
     rating: int = Field(..., ge=1, le=5)
 
 
+class OnboardingRefreshSubmit(BaseModel):
+    """Payload for refreshing onboarding while preserving current selections."""
+
+    selected_product_ids: list[str] = Field(default_factory=list)
+
+
 class OnboardingSubmitOut(BaseModel):
     """Result after onboarding picks are accepted."""
 

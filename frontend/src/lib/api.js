@@ -220,6 +220,15 @@ export async function submitOnboarding(gameId, selectedProductIds, rating) {
   });
 }
 
+export async function refreshOnboarding(gameId, selectedProductIds = []) {
+  return request(`/api/game/${gameId}/onboarding/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({
+      selected_product_ids: selectedProductIds,
+    }),
+  });
+}
+
 export async function submitSeedPreferences(gameId, likes = {}, dislikes = {}, likeProductIds = [], dislikeProductIds = []) {
   return request(`/api/game/${gameId}/seed`, {
     method: 'POST',
