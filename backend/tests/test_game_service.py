@@ -100,6 +100,38 @@ class GameServiceTests(unittest.TestCase):
         self.assertFalse(GameService._has_carryable_profile({"onboarding_selected_ids": [str(index) for index in range(10)]}))
 
 
+class OnboardingRefreshTests(unittest.IsolatedAsyncioTestCase):
+    async def test_build_onboarding_pool_refresh_preserves_selected_ids(self):
+        service = GameService()
+        products = [{"_id": f"p{index}"} for index in range(250)]
+        original_pool = [f"p{index}" for index in range(100)]
+
+        async def fake_all_products(_db, _category):
+            return products
+
+        service._all_products_for_onboarding_sample = fake_all_products
+        service._diverse_onboarding_sample = lambda all_products, _game_id, _category: [str(p["_id"]) for p in all_products[:100]]
+
+        refreshed = await service._build_onboarding_pool(
+            None,
+            {
+                "_id": "game-1",
+                "mode": "classic",
+                "onboarding_pool_ids": original_pool,
+            },
+            "fountain_pens",
+            preserved_ids=["p2", "p7", "p15"],
+            force_refresh=True,
+        )
+
+        self.assertEqual(refreshed[:3], ["p2", "p7", "p15"])
+        self.assertEqual(len(refreshed), 100)
+        self.assertTrue(set(["p2", "p7", "p15"]).issubset(set(refreshed)))
+        self.assertNotIn("p0", refreshed)
+        self.assertNotIn("p99", refreshed)
+        self.assertIn("p100", refreshed)
+        self.assertIn("p196", refreshed)
+
+
 if __name__ == "__main__":
     unittest.main()
-

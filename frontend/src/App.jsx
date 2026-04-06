@@ -26,6 +26,7 @@ import {
   getUserRole,
   getUserId,
   logoutUser,
+  refreshOnboarding,
   refreshRound,
   startGame,
   startRound,
@@ -82,6 +83,7 @@ export default function App() {
   const [seenHiddenPreferenceNames, setSeenHiddenPreferenceNames] = useState([]);
   const [previousHiddenPreferenceNames, setPreviousHiddenPreferenceNames] = useState([]);
   const [lessLikeIds, setLessLikeIds] = useState([]);
+  const [refreshingOnboarding, setRefreshingOnboarding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [seedBusy, setSeedBusy] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -360,6 +362,20 @@ export default function App() {
     }
   }
 
+  async function handleRefreshOnboarding() {
+    if (!game) return;
+    setRefreshingOnboarding(true);
+    setError('');
+    try {
+      const refreshedOnboarding = await refreshOnboarding(game.id, selectedIds);
+      setOnboarding(refreshedOnboarding);
+    } catch (refreshError) {
+      setError(refreshError.message || 'Could not refresh the onboarding pool.');
+    } finally {
+      setRefreshingOnboarding(false);
+    }
+  }
+
   async function handleSeedSubmit(payload) {
     if (!game) return;
     setSeedBusy(true);
@@ -621,10 +637,12 @@ export default function App() {
                 selectedIds={selectedIds}
                 onToggle={handleToggleOnboarding}
                 onOpenRating={() => setRatingModalOpen(true)}
+                onRefresh={handleRefreshOnboarding}
+                refreshing={refreshingOnboarding}
                 mode={mode}
-              categoryCopy={onboarding.category_copy || {}}
-              seedPreferences={seedPreferences}
-            />
+                categoryCopy={onboarding.category_copy || {}}
+                seedPreferences={seedPreferences}
+              />
               <SetRatingModal
                 open={ratingModalOpen}
                 rating={rating}

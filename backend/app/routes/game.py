@@ -20,6 +20,7 @@ from ..schemas_game import (
     SeedPreferencesSubmit,
     LeaderboardEntry,
     OnboardingOut,
+    OnboardingRefreshSubmit,
     OnboardingSubmit,
     OnboardingSubmitOut,
     PlayerGameEntry,
@@ -140,6 +141,24 @@ async def submit_onboarding(
             rating=payload.rating,
         )
         return OnboardingSubmitOut(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{game_id}/onboarding/refresh", response_model=OnboardingOut)
+async def refresh_onboarding(
+    game_id: str,
+    payload: OnboardingRefreshSubmit,
+    db: AsyncSession = Depends(get_db),
+):
+    """Refresh the onboarding pool while keeping current selections available."""
+    try:
+        result = await game_service.refresh_onboarding(
+            db,
+            game_id,
+            selected_product_ids=payload.selected_product_ids,
+        )
+        return OnboardingOut(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
