@@ -5,7 +5,7 @@ This guide explains how to expose the Docker backend (`127.0.0.1:8015`) as a pub
 ## Why This Is Needed
 
 `http://localhost:8015` only works on the same machine.
-A hosted frontend (for example Render) must call a public URL like `https://sd-vm23.csc.ncsu.edu`.
+A hosted frontend (for example Render) must call a public URL like `https://api.example.com`.
 
 ## Current Compose Security Model
 
@@ -55,14 +55,13 @@ Note:
 
 Project template files:
 
-- `deploy/nginx/decidio.conf`
 - `deploy/nginx/decidio.conf.example`
 
 Your current config uses:
 
-- `server_name sd-vm23.csc.ncsu.edu`
-- `ssl_certificate /etc/pki/tls/certs/sd-vm23.csc.ncsu.edu.crt`
-- `ssl_certificate_key /etc/pki/tls/private/sd-vm23.csc.ncsu.edu.key`
+- `server_name api.example.com`
+- `ssl_certificate /etc/pki/tls/certs/api.example.com.crt`
+- `ssl_certificate_key /etc/pki/tls/private/api.example.com.key`
 - `proxy_pass http://127.0.0.1:8015`
 
 If your key is in a different folder, update the key path accordingly.
@@ -72,7 +71,7 @@ If your key is in a different folder, update the key path accordingly.
 Copy the config to Nginx:
 
 ```bash
-sudo cp deploy/nginx/decidio.conf /etc/nginx/conf.d/decidio.conf
+sudo cp deploy/nginx/decidio.conf.example /etc/nginx/conf.d/decidio.conf
 ```
 
 Validate syntax:
@@ -90,7 +89,7 @@ sudo systemctl reload nginx
 ## 5. Verify backend is reachable in VM
 
 ```bash
-curl https://sd-vm23.csc.ncsu.edu/api/game/categories
+curl https://api.example.com/api/game/categories
 ```
 
 ## 6. Frontend Environment Variable (`VITE_API_BASE_URL`)
@@ -100,7 +99,7 @@ curl https://sd-vm23.csc.ncsu.edu/api/game/categories
 In Render service environment:
 
 ```env
-VITE_API_BASE_URL=https://sd-vm23.csc.ncsu.edu
+VITE_API_BASE_URL=https://api.example.com
 ```
 
 Redeploy frontend after changing this.
@@ -125,7 +124,7 @@ Examples:
 docker compose --profile local-frontend up -d --build frontend
 
 # Overrides fallback and uses public backend URL
-VITE_API_BASE_URL=https://sd-vm23.csc.ncsu.edu docker compose --profile local-frontend up -d --build frontend
+VITE_API_BASE_URL=https://api.example.com docker compose --profile local-frontend up -d --build frontend
 ```
 
 Note: Vite reads `VITE_*` values at build/start time. Rebuild/recreate frontend when the value changes.
