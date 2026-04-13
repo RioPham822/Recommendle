@@ -1,6 +1,9 @@
 ﻿import unittest
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import numpy as np
 
 from app.services.game_service import GameService
 
@@ -393,6 +396,266 @@ class ResumeStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "playing")
         self.assertEqual(result["current_round"], 3)
         self.assertEqual(result["total_rounds"], 5)
+
+
+class _ScalarListResult:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return self._items
+
+
+class _ExecuteListResult:
+    def __init__(self, items):
+        self._items = items
+
+    def scalars(self):
+        return _ScalarListResult(self._items)
+
+    def all(self):
+        return self._items
+
+
+class _ServiceDB:
+    def __init__(self, scalar_results=None, execute_results=None):
+        self.scalar_results = list(scalar_results or [])
+        self.execute_results = list(execute_results or [])
+
+    async def scalar(self, _stmt):
+        if self.scalar_results:
+            return self.scalar_results.pop(0)
+        return None
+
+    async def execute(self, _stmt):
+        if self.execute_results:
+            return _ExecuteListResult(self.execute_results.pop(0))
+        return _ExecuteListResult([])
+
+
+class _ScoringFeatureSpace:
+    def __init__(self):
+        self.feature_index = {"f1": 0, "f2": 1}
+
+    def vectorize(self, product):
+        value = float(product.get("score_base", 0.0))
+        return np.array([value, 1.0], dtype=np.float32)
+
+
+class GameServiceDataFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_products_by_ids_preserves_order(self):
+        service = GameService()
+        rows = [
+            SimpleNamespace(id="p2"),
+            SimpleNamespace(id="p1"),
+        ]
+        db = _ServiceDB(execute_results=[[rows[0], rows[1]]])
+
+        with patch("app.services.game_service.record_to_dict", side_effect=lambda row: {"_id": row.id, "title": row.id}):
+            result = await service._get_products_by_ids(db, ["p1", "p2"])
+
+        self.assertEqual([item["_id"] for item in result], ["p1", "p2"])
+
+    async def test_get_products_by_ids_applies_projection(self):
+        service = GameService()
+        row = SimpleNamespace(id="p1")
+        db = _ServiceDB(execute_results=[[row]])
+
+        with patch(
+            "app.services.game_service.record_to_dict",
+            return_value={"_id": "p1", "title": "Pen", "vendor": "Pilot", "extra": "ignore"},
+        ):
+            result = await service._get_products_by_ids(
+                db,
+                ["p1"],
+                projection={"title": 1, "vendor": 1, "_id": 1},
+            )
+
+        self.assertEqual(result, [{"_id": "p1", "title": "Pen", "vendor": "Pilot"}])
+
+    async def test_completed_pick_ids_returns_only_nonempty_picks(self):
+        service = GameService()
+        rows = [
+            SimpleNamespace(human_pick_id="p1"),
+            SimpleNamespace(human_pick_id=None),
+            SimpleNamespace(human_pick_id="p3"),
+        ]
+        db = _ServiceDB(execute_results=[[rows[0], rows[1], rows[2]]])
+
+        result = await service._completed_pick_ids(db, "game-1")
+
+        self.assertEqual(result, ["p1", "p3"])
+
+    async def test_historical_selection_sequence_combines_onboarding_and_completed(self):
+        service = GameService()
+        service._completed_pick_ids = AsyncMock(return_value=["p3", "p4"])
+
+        result = await service._historical_selection_sequence(
+            None,
+            {"_id": "game-1", "onboarding_selected_ids": ["p1", "p2"]},
+            include_product_id="p5",
+        )
+
+        self.assertEqual(result, ["p1", "p2", "p3", "p4", "p5"])
+
+    async def test_active_preference_sequence_prefers_active_ids(self):
+        service = GameService()
+
+        result = await service._active_preference_sequence(
+            None,
+            {"model_state": {"active_preference_ids": ["p1", "p2", "p1"]}},
+            include_product_id="p3",
+        )
+
+        self.assertEqual(result, ["p1", "p2", "p3"])
+
+    async def test_current_selection_sequence_uses_active_for_redesigned_games(self):
+        service = GameService()
+        service._active_preference_sequence = AsyncMock(return_value=["a1", "a2"])
+        service._historical_selection_sequence = AsyncMock(return_value=["h1", "h2"])
+
+        result = await service._current_selection_sequence(
+            None,
+            {"schema_version": 3, "model_state": {}},
+        )
+
+        self.assertEqual(result, ["a1", "a2"])
+        service._active_preference_sequence.assert_awaited_once()
+        service._historical_selection_sequence.assert_not_awaited()
+
+    async def test_current_selection_sequence_uses_historical_for_legacy_games(self):
+        service = GameService()
+        service._active_preference_sequence = AsyncMock(return_value=["a1", "a2"])
+        service._historical_selection_sequence = AsyncMock(return_value=["h1", "h2"])
+
+        result = await service._current_selection_sequence(
+            None,
+            {"schema_version": 2, "model_state": {}},
+        )
+
+        self.assertEqual(result, ["h1", "h2"])
+        service._historical_selection_sequence.assert_awaited_once()
+
+    async def test_metrics_for_state_returns_float_scores(self):
+        service = GameService()
+        service.recommender.feature_space = _ScoringFeatureSpace()
+        service._get_products_by_ids = AsyncMock(
+            return_value=[
+                {"_id": "p1", "score_base": 1.0},
+                {"_id": "p2", "score_base": 2.0},
+            ]
+        )
+
+        model = SimpleNamespace(
+            coherence_score=lambda vectors: 0.88,
+            predict_prefix_rating=lambda state: 4.2,
+        )
+
+        result = await service._metrics_for_state(None, model, {"user_vec": [1.0]}, ["p1", "p2"], "fountain_pens")
+
+        self.assertEqual(result, {"coherence_score": 0.88, "predicted_prefix_rating": 4.2})
+
+    async def test_all_products_for_scoring_uses_cache_when_count_matches(self):
+        service = GameService()
+        service._scoring_catalog_cache["fountain_pens"] = {
+            "count": 2,
+            "products": [{"_id": "cached-1"}, {"_id": "cached-2"}],
+        }
+        db = _ServiceDB(scalar_results=[2])
+
+        result = await service._all_products_for_scoring(db, "fountain_pens")
+
+        self.assertEqual(result, [{"_id": "cached-1"}, {"_id": "cached-2"}])
+
+    async def test_all_products_for_scoring_refreshes_cache_when_count_changes(self):
+        service = GameService()
+        rows = [SimpleNamespace(id="p1"), SimpleNamespace(id="p2")]
+        db = _ServiceDB(scalar_results=[2], execute_results=[[rows[0], rows[1]]])
+
+        with patch(
+            "app.services.game_service.record_to_dict",
+            side_effect=lambda row: {"_id": row.id, "category": "fountain_pens"},
+        ):
+            result = await service._all_products_for_scoring(db, "fountain_pens")
+
+        self.assertEqual([item["_id"] for item in result], ["p1", "p2"])
+        self.assertEqual(service._scoring_catalog_cache["fountain_pens"]["count"], 2)
+
+    async def test_all_products_for_onboarding_sample_filters_rows(self):
+        service = GameService()
+        rows = [SimpleNamespace(id="m1"), SimpleNamespace(id="m2")]
+        db = _ServiceDB(execute_results=[[rows[0], rows[1]]])
+
+        with patch(
+            "app.services.game_service.record_to_dict",
+            side_effect=[
+                {"_id": "m1", "category": "movies", "vote_count": 999},
+                {"_id": "m2", "category": "movies", "vote_count": 1500},
+            ],
+        ):
+            result = await service._all_products_for_onboarding_sample(db, "movies")
+
+        self.assertEqual([item["_id"] for item in result], ["m2"])
+
+    async def test_warm_scoring_catalog_swallows_errors(self):
+        service = GameService()
+        service._all_products_for_scoring = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await service._warm_scoring_catalog(None, "fountain_pens")
+
+        service._all_products_for_scoring.assert_awaited_once()
+
+    def test_rank_candidates_orders_highest_score_first(self):
+        service = GameService()
+        service.recommender.feature_space = _ScoringFeatureSpace()
+        service.recommender.item_vectors = {}
+        service.recommender.item_norms = {}
+
+        model = SimpleNamespace(feature_space=service.recommender.feature_space)
+        state = {"user_vec": [1.0, 0.0], "bias": 0.0}
+        products = [
+            {"_id": "p1", "score_base": 0.2},
+            {"_id": "p2", "score_base": 0.9},
+            {"_id": "p3", "score_base": 0.5},
+        ]
+
+        ranked = service._rank_candidates(model, state, products, "fountain_pens", disliked_tokens=set())
+
+        self.assertEqual([product["_id"] for _, product in ranked], ["p2", "p3", "p1"])
+
+    def test_seeded_onboarding_sample_returns_target_size(self):
+        service = GameService()
+        all_products = [{"_id": f"p{i}"} for i in range(150)]
+        scored = [(5.0 - (i * 0.01), product) for i, product in enumerate(all_products)]
+
+        service._rank_candidates = lambda model, state, products, category, disliked_tokens: scored
+
+        with patch("app.services.game_service.get_category_profile", return_value=SimpleNamespace(onboarding_pool_size=100)):
+            result = service._seeded_onboarding_sample(
+                all_products,
+                "game-1",
+                "fountain_pens",
+                SimpleNamespace(),
+                {"disliked_tokens": []},
+            )
+
+        self.assertEqual(len(result), 100)
+        self.assertEqual(len(set(result)), 100)
+
+    async def test_get_categories_aggregates_counts_by_supported_category(self):
+        service = GameService()
+        rows = [
+            ("fountain_pens", {"vendor": "Pilot"}),
+            ("movies", {"vote_count": 1500}),
+            ("movies", {"vote_count": 999}),
+        ]
+        db = _ServiceDB(execute_results=[rows])
+
+        result = await service.get_categories(db)
+
+        by_id = {item["id"]: item for item in result}
+        self.assertEqual(by_id["fountain_pens"]["available_count"], 1)
+        self.assertEqual(by_id["movies"]["available_count"], 1)
 
 
 if __name__ == "__main__":
