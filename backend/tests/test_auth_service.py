@@ -40,6 +40,7 @@ class _User:
         self.username = username
         self.password_hash = password_hash_value or hash_password("secret123")
         self.display_name = display_name
+        self.role = "user"
         self.games = []
         self.session_tokens = list(session_tokens or [])
         self.created_at = created_at or datetime.utcnow()
