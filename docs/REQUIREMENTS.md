@@ -38,7 +38,7 @@ Status legend:
 | FR-03 | The system shall present an onboarding pool of 100 candidate items for the chosen category. | Implemented |
 | FR-04 | The system shall allow 1 to 10 onboarding selections before proceeding. | Implemented |
 | FR-05 | The system shall collect a set-level prefix rating after onboarding (coherence rating of selected set). | Implemented |
-| FR-06 | The system shall run sequential rounds (currently 5) where the user picks one item from generated candidates (currently 10). | Implemented |
+| FR-06 | The system shall run sequential rounds where the user picks one item from generated candidates (currently 10) until the configured preference-match streak target is reached. | Implemented |
 | FR-07 | The AI model shall update user preference state after each choice and generate the next round candidates. | Implemented |
 | FR-08 | The system shall score AI vs human outcomes per round and cumulatively across the session. | Implemented |
 | FR-09 | The system shall provide per-round explanation including AI pick, user pick, and top candidate rankings. | Implemented |
@@ -90,7 +90,7 @@ Status legend:
 ### 6.4 Product Constraints
 - Current system is web-first, not native mobile.
 - Basic authentication is implemented; advanced authorization and multi-tenant account management are not implemented.
-- Current rounds are fixed in code to 5 for game mode.
+- The default preference-match streak target is 5, but total rounds played can exceed 5 before a run completes.
 
 ## 7. Requirement Traceability to Initial Statement
 From the sponsor document:

@@ -4,7 +4,7 @@ Current backend API reference for the Postgres-backed application.
 
 Base URLs:
 - Local: `http://localhost:8015`
-- Public example: `https://sd-vm23.csc.ncsu.edu`
+- Public backend example: `https://api.example.com`
 
 Authentication headers used by protected routes:
 - `Authorization: Bearer <session_token>`
@@ -79,6 +79,7 @@ Invalidates one session token.
 
 - `GET /api/game/{game_id}/onboarding`
 - `POST /api/game/{game_id}/onboarding/submit`
+- `POST /api/game/{game_id}/onboarding/refresh`
 
 ### Round endpoints
 
