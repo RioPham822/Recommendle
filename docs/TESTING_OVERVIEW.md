@@ -337,9 +337,9 @@ Reference files:
 - [movie_validation_baseline.json](../backend/tests/ml/fixtures/movie_validation_baseline.json)
 - [test_model_validation.py](../backend/tests/ml/test_model_validation.py)
 
-## What These Tests Give The Sponsor Confidence In
+## What These Tests Provide Confidence In
 
-From a sponsor perspective, the testing work provides confidence that:
+The testing work provides confidence that:
 
 - the game experience is functioning correctly
 - the recommendation model is not just running, but adapting to choices
@@ -381,6 +381,6 @@ This includes:
 
 The same general approach can later be extended to `fountain_pens` and `games`.
 
-## In One Sentence
+## Summary
 
-Our tests are designed to show that the system works correctly, that the recommendation model learns from player choices, and that we can detect when model quality becomes unstable or degrades over time.
+The tests are designed to show that the system works correctly, that the recommendation model learns from player choices, and that model quality can be monitored for instability or degradation over time.
