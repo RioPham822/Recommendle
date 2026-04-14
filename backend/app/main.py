@@ -106,6 +106,12 @@ async def list_products(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         filters.append(ProductRecord.category == normalized_category)
+    if price_min is not None or price_max is not None:
+        if normalized_category != "fountain_pens":
+            raise HTTPException(
+                status_code=400,
+                detail="price_min and price_max filters are only supported for category='fountain_pens'",
+            )
     if price_min is not None:
         filters.append(cast(ProductRecord.data["price_min"].as_string(), Float) >= price_min)
     if price_max is not None:
