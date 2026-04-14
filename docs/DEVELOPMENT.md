@@ -176,4 +176,5 @@ Use:
 - `docs/FEATURES_GUIDE.md` for user-facing behavior
 - `docs/ADDING_DATASETS.md` for category extension
 - `docs/INGESTION_GUIDE.md` for TMDB and IGDB script flags
+- `docs/DB_SYNC.md` for copying Postgres data from the VM Docker database into local Docker
 - `docs/NGINX_SETUP.md` for deployment and backup notes

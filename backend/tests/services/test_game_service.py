@@ -44,6 +44,30 @@ class GameServiceTests(unittest.TestCase):
         self.assertNotIn("options", card["attributes"])
         self.assertEqual(card["attributes"]["Nib Size"], ["Extra-Fine", "Fine", "Medium"])
         self.assertEqual(card["attributes"]["product_type"], "Fountain Pen")
+        self.assertNotIn("price_min", card)
+        self.assertNotIn("price_max", card)
+
+    def test_product_card_excludes_pen_price_fields_for_movies(self):
+        service = GameService()
+        product = {
+            "_id": "movie-1",
+            "category": "movies",
+            "title": "Arrival",
+            "vendor": "Paramount",
+            "price_min": 9.99,
+            "price_max": 14.99,
+            "release_year": 2016,
+            "runtime_minutes": 116,
+            "vote_average": 7.9,
+            "directors": ["Denis Villeneuve"],
+        }
+
+        card = service._product_card(product)
+
+        self.assertEqual(card["category"], "movies")
+        self.assertNotIn("price_min", card)
+        self.assertNotIn("price_max", card)
+        self.assertEqual(card["subtitle"], "Dir. Denis Villeneuve")
 
     def test_predicted_match_features_hide_raw_model_tokens(self):
         service = GameService()
