@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import Float, and_, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..category_profiles import get_category_profile, humanize_feature_list, normalize_category, supported_categories
+from ..category_profiles import category_display_schema, get_category_profile, humanize_feature_list, normalize_category, supported_categories
 from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, UserRecord, get_db, record_to_dict
 from ..services.auth import active_session_tokens, auth_service, require_admin
 from ..services.ml_config import DEFAULT_ML_CONFIG, ml_config_service
@@ -132,6 +132,33 @@ def _preferred_product_columns(category: str) -> list[str]:
     return list(PREFERRED_PRODUCT_FIELDS.get(category, ["title", "vendor", "description", "url", "created_at"]))
 
 
+def _allowed_product_fields(category: str) -> set[str]:
+    profile = get_category_profile(category)
+    display_schema = category_display_schema(category)
+    allowed = {
+        "title",
+        "vendor",
+        "description",
+        "url",
+        "quality_score",
+        "created_at",
+        *profile.categorical_fields,
+        *profile.multi_fields,
+        *profile.numeric_fields,
+    }
+    for field in display_schema.get("card_fields", []):
+        key = field.get("key")
+        if key and key != "price":
+            allowed.add(str(key))
+    for field in display_schema.get("detail_fields", []):
+        key = field.get("key")
+        if key and key != "price":
+            allowed.add(str(key))
+    for field in _preferred_product_columns(category):
+        allowed.add(field)
+    return allowed
+
+
 def _column_kind(key: str) -> str:
     if key in {"thumbnail"}:
         return "thumbnail"
@@ -182,7 +209,8 @@ async def _load_product_columns(db: AsyncSession, category: str) -> list[dict[st
         if not isinstance(payload, dict):
             continue
         discovered_set.update(str(key) for key in payload.keys())
-    discovered = sorted(key for key in discovered_set if key not in EXCLUDED_PRODUCT_FIELDS)
+    allowed_fields = _allowed_product_fields(category)
+    discovered = sorted(key for key in discovered_set if key not in EXCLUDED_PRODUCT_FIELDS and key in allowed_fields)
     ordered = _preferred_product_columns(category)
     for key in discovered:
         if key not in ordered:

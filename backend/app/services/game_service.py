@@ -257,8 +257,6 @@ class GameService(GamePlayMixin, GameInsightsMixin):
             "title": product.get("title") or "Untitled",
             "vendor": product.get("vendor"),
             "subtitle": subtitle,
-            "price_min": product.get("price_min"),
-            "price_max": product.get("price_max"),
             "attributes": attributes,
             "meta_badges": badges,
             "tags": clean_display_tags(resolved_category, product.get("tags"), limit=8),

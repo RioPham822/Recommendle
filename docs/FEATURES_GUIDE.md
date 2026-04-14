@@ -35,14 +35,15 @@ Current frontend flow:
 4. The player can optionally seed likes and dislikes before onboarding.
 5. The player completes onboarding from a 100-item pool.
 6. The player rates the onboarding set.
-7. The player plays 5 rounds of AI-vs-human selection.
+7. The player plays AI-vs-human rounds until the model reaches the configured preference-match streak target.
 8. The player sees a final summary and leaderboard context.
 
 Current rules:
 - onboarding pool size: 100 items
 - onboarding selections allowed: 1 to 10
 - round candidates: 10
-- total rounds: 5
+- default preference-match streak target: 5
+- the run can finish in more than 5 rounds if the AI does not keep its streak alive
 
 ## Beta Features
 
@@ -55,6 +56,7 @@ Currently implemented:
 Relevant endpoints:
 - `POST /api/game/{game_id}/seed`
 - `POST /api/game/{game_id}/feedback`
+- `POST /api/game/{game_id}/onboarding/refresh`
 - `POST /api/game/{game_id}/round/refresh`
 - `PATCH /api/game/{game_id}/preferences`
 

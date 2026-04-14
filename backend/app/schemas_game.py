@@ -16,8 +16,6 @@ class ProductCard(BaseModel):
     title: str
     vendor: str | None = None
     subtitle: str | None = None
-    price_min: float | None = None
-    price_max: float | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
     meta_badges: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
