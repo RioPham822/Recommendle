@@ -85,6 +85,7 @@ docker compose down -v
 ## Docs
 
 - [Development Guide](docs/DEVELOPMENT.md)
+- [Testing Overview](docs/TESTING_OVERVIEW.md)
 - [API Reference](docs/API_REFERENCE.md)
 - [Features Guide](docs/FEATURES_GUIDE.md)
 - [Adding Datasets](docs/ADDING_DATASETS.md)
