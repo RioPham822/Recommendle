@@ -21,6 +21,9 @@ class _FakeModel:
     def update_with_prefix_rating(self, state, rating):
         state["last_rating"] = rating
 
+    def detect_hidden_preferences(self, state, products):
+        return [{"feature": "material", "latency": 0.61}]
+
 
 class _FakeRoundRow:
     def __init__(self, candidate_ids=None, completed=False):
@@ -155,6 +158,12 @@ class _FakeService(GamePlayMixin):
         if self._ranked_candidates:
             return list(self._ranked_candidates)
         return [(5.0 - idx * 0.1, product) for idx, product in enumerate(products)]
+
+    def _build_round_candidates(self, game_id, round_number, category, scored):
+        return [str(product["_id"]) for _, product in scored[:10]]
+
+    def _is_redesigned_game(self, game):
+        return True
 
 
 class GamePlayHelperTests(unittest.TestCase):
@@ -563,3 +572,109 @@ class GamePlaySuccessPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["candidates"]), 2)
         self.assertEqual(result["candidates"][0]["id"], "c1")
         self.assertEqual(result["pre_round_metrics"]["coherence_score"], 0.7)
+
+    async def test_submit_pick_success_updates_scores_and_completes_game(self):
+        service = _FakeService()
+        service.recommender.feature_space.feature_index = {"material": 0}
+        service.recommender.item_vectors = {
+            "c1": np.array([2.0], dtype=np.float32),
+            "c2": np.array([-1.0], dtype=np.float32),
+        }
+        service.recommender.item_norms = {
+            "c1": 2.0,
+            "c2": 1.0,
+        }
+        service._refresh_game = {
+            "_id": "game-1",
+            "category": "fountain_pens",
+            "status": "playing",
+            "current_round": 0,
+            "human_score": 0,
+            "model_state": {
+                "user_vec": [1.0],
+                "current_match_streak": 0,
+                "longest_match_streak": 0,
+                "match_streak_target": 1,
+                "active_preference_ids": ["seed-1"],
+            },
+        }
+        service._products_by_id = {
+            "c1": {"_id": "c1", "title": "Top Pick"},
+            "c2": {"_id": "c2", "title": "Other Pick"},
+            "d1": {"_id": "d1", "title": "Less Like This"},
+        }
+
+        round_row = _FakeRoundRow(candidate_ids=["c1", "c2"], completed=False)
+        game_row = SimpleNamespace(
+            current_round=0,
+            human_score=0,
+            ai_score=0,
+            status="playing",
+            model_state={},
+            updated_at=None,
+        )
+        db = _FakeDB([round_row, game_row])
+
+        result = await service.submit_pick(db, "game-1", 1, "c1", less_like_ids=["d1", "c1"])
+
+        self.assertTrue(result["ai_correct"])
+        self.assertTrue(result["ai_exact"])
+        self.assertTrue(result["game_complete"])
+        self.assertEqual(result["human_points"], 1)
+        self.assertEqual(result["ai_points"], 0)
+        self.assertEqual(result["current_match_streak"], 1)
+        self.assertEqual(result["total_human_score"], 1)
+        self.assertEqual(result["ai_pick"]["id"], "c1")
+        self.assertIn("Preference Match!", result["ai_explanation"]["reason"])
+        self.assertEqual(game_row.status, "completed")
+        self.assertEqual(game_row.current_round, 1)
+        self.assertEqual(game_row.human_score, 1)
+        self.assertEqual(game_row.ai_score, 0)
+        self.assertIn("d1", game_row.model_state["disliked_ids"])
+        self.assertEqual(db.commits, 1)
+
+    async def test_refresh_round_success_updates_candidates_and_dislikes(self):
+        service = _FakeService()
+        service._refresh_game = {
+            "_id": "game-1",
+            "category": "fountain_pens",
+            "status": "playing",
+            "current_round": 0,
+            "onboarding_selected_ids": ["seed-1"],
+            "model_state": {
+                "user_vec": [0.5],
+                "current_match_streak": 0,
+                "longest_match_streak": 1,
+                "match_streak_target": 3,
+                "active_preference_ids": ["seed-1"],
+            },
+        }
+        service._all_scoring_products = [{"_id": f"cand-{idx}", "title": f"Cand {idx}"} for idx in range(12)]
+        service._products_by_id = {
+            **{f"cand-{idx}": {"_id": f"cand-{idx}", "title": f"Cand {idx}"} for idx in range(12)},
+            "less-1": {"_id": "less-1", "title": "Avoid Me"},
+        }
+        service._ranked_candidates = [
+            (5.0 - idx * 0.1, {"_id": f"cand-{idx}", "title": f"Cand {idx}"}) for idx in range(10)
+        ]
+
+        round_row = _FakeRoundRow(candidate_ids=["old-1", "old-2"], completed=False)
+        game_row = SimpleNamespace(status="playing", model_state={}, updated_at=None)
+        db = _FakeDB([round_row, game_row])
+
+        with patch(
+            "app.services.game_play.get_category_profile",
+            return_value=SimpleNamespace(
+                round_mode="standard",
+                round_intro_title="New Round",
+                round_intro_body="Fresh picks",
+            ),
+        ):
+            result = await service.refresh_round(db, "game-1", less_like_ids=["less-1", "less-1"])
+
+        self.assertEqual(result["round_number"], 1)
+        self.assertEqual(len(result["candidates"]), 10)
+        self.assertEqual(round_row.candidate_ids, [f"cand-{idx}" for idx in range(10)])
+        self.assertIn("less-1", game_row.model_state["disliked_ids"])
+        self.assertEqual(game_row.status, "playing")
+        self.assertEqual(db.commits, 1)
