@@ -159,6 +159,12 @@ To protect against that, we added baseline regression testing. This means:
 
 This helps us catch subtle degradation, not just complete breakage.
 
+Files used for this:
+
+- [movie_validation_fixture.json](../backend/tests/ml/fixtures/movie_validation_fixture.json)
+- [movie_validation_baseline.json](../backend/tests/ml/fixtures/movie_validation_baseline.json)
+- [test_model_validation.py](../backend/tests/ml/test_model_validation.py)
+
 ### What "robust" means
 
 Real-world data is not always clean.
