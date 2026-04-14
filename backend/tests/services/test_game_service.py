@@ -445,6 +445,10 @@ class _ServiceDB:
     def __init__(self, scalar_results=None, execute_results=None):
         self.scalar_results = list(scalar_results or [])
         self.execute_results = list(execute_results or [])
+        self.added = []
+        self.deleted = []
+        self.commits = 0
+        self.refreshed = []
 
     async def scalar(self, _stmt):
         if self.scalar_results:
@@ -455,6 +459,45 @@ class _ServiceDB:
         if self.execute_results:
             return _ExecuteListResult(self.execute_results.pop(0))
         return _ExecuteListResult([])
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def delete(self, value):
+        self.deleted.append(value)
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, value):
+        if getattr(value, "id", None) is None:
+            value.id = f"generated-{len(self.refreshed) + 1}"
+        self.refreshed.append(value)
+
+
+class _MutationModel:
+    def __init__(self):
+        self.feature_space = SimpleNamespace(feature_index={"f1": 0})
+
+    def init_state(self):
+        return {"user_vec": [0.0], "seeded": False}
+
+    def update_with_negative_feedback(self, state, product):
+        state.setdefault("negative_ids", []).append(str(product["_id"]))
+
+    def update_with_selection(self, state, product, is_exception=False):
+        state.setdefault("selected_ids", []).append(str(product["_id"]))
+
+    def update_with_prefix_rating(self, state, rating):
+        state["rating"] = int(rating)
+
+
+class _AttrDict(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
 
 class _ScoringFeatureSpace:
@@ -680,6 +723,201 @@ class GameServiceDataFlowTests(unittest.IsolatedAsyncioTestCase):
         by_id = {item["id"]: item for item in result}
         self.assertEqual(by_id["fountain_pens"]["available_count"], 1)
         self.assertEqual(by_id["movies"]["available_count"], 1)
+
+    async def test_create_game_fresh_start_resets_existing_active_game(self):
+        service = GameService()
+        active_game = SimpleNamespace(
+            id="game-1",
+            status="playing",
+            current_round=4,
+            total_rounds=9,
+            human_score=3,
+            ai_score=1,
+            mode="classic",
+            schema_version=2,
+            model_state={"user_vec": [1.0]},
+            onboarding_pool_ids=["p1"],
+            onboarding_selected_ids=["p2"],
+            onboarding_rating=5,
+            updated_at=None,
+        )
+        db = _ServiceDB(scalar_results=[active_game, None])
+        model = _MutationModel()
+
+        service._ensure_indexes = AsyncMock()
+        service._ensure_model = AsyncMock(return_value=model)
+        service._game_out_payload = lambda game, resumed=False: {
+            "id": game.id,
+            "status": game.status,
+            "resumed": resumed,
+            "mode": game.mode,
+            "schema_version": game.schema_version,
+        }
+
+        result = await service.create_game(db, " Sai ", fresh_start=True, mode="beta")
+
+        self.assertEqual(result, {"id": "game-1", "status": "onboarding", "resumed": False, "mode": "beta", "schema_version": 3})
+        self.assertEqual(active_game.current_round, 0)
+        self.assertEqual(active_game.human_score, 0)
+        self.assertEqual(active_game.ai_score, 0)
+        self.assertEqual(active_game.onboarding_pool_ids, [])
+        self.assertEqual(active_game.onboarding_selected_ids, [])
+        self.assertIsNone(active_game.onboarding_rating)
+        self.assertEqual(db.commits, 1)
+        self.assertEqual(len(db.refreshed), 1)
+
+    async def test_create_game_reuses_legacy_active_game_as_resumed(self):
+        service = GameService()
+        active_game = SimpleNamespace(
+            id="game-2",
+            status="ready",
+            current_round=1,
+            total_rounds=2,
+            human_score=1,
+            ai_score=0,
+            mode="classic",
+            schema_version=2,
+            model_state={},
+            updated_at=None,
+        )
+        db = _ServiceDB(scalar_results=[active_game, None])
+        model = _MutationModel()
+
+        service._ensure_indexes = AsyncMock()
+        service._ensure_model = AsyncMock(return_value=model)
+        service._game_out_payload = lambda game, resumed=False: {
+            "id": game.id,
+            "resumed": resumed,
+            "schema_version": game.schema_version,
+            "total_rounds": game.total_rounds,
+        }
+
+        result = await service.create_game(db, "Sai")
+
+        self.assertTrue(result["resumed"])
+        self.assertEqual(result["schema_version"], 3)
+        self.assertEqual(result["total_rounds"], service.DEFAULT_MATCH_STREAK_TARGET)
+        self.assertEqual(db.commits, 1)
+        self.assertEqual(len(db.refreshed), 1)
+
+    async def test_create_game_uses_completed_profile_for_ready_game(self):
+        service = GameService()
+        completed_game = _AttrDict(
+            model_state={"user_vec": [0.4], "current_match_streak": 3, "rounds_played": 7},
+            onboarding_selected_ids=["p1", "p2"],
+            onboarding_rating=4,
+        )
+        db = _ServiceDB(scalar_results=[None, completed_game])
+        model = _MutationModel()
+
+        service._ensure_indexes = AsyncMock()
+        service._ensure_model = AsyncMock(return_value=model)
+        service._game_out_payload = lambda game, resumed=False: {
+            "status": game.status,
+            "resumed": resumed,
+            "onboarding_selected_ids": list(game.onboarding_selected_ids),
+            "onboarding_rating": game.onboarding_rating,
+        }
+
+        result = await service.create_game(db, "Sai", category="fountain_pens")
+
+        self.assertEqual(result["status"], "ready")
+        self.assertFalse(result["resumed"])
+        self.assertEqual(result["onboarding_selected_ids"], ["p1", "p2"])
+        self.assertEqual(result["onboarding_rating"], 4)
+        self.assertEqual(len(db.added), 1)
+        self.assertEqual(db.commits, 1)
+
+    async def test_submit_feedback_updates_disliked_state_in_beta_mode(self):
+        service = GameService()
+        model = _MutationModel()
+        service._get_game = AsyncMock(
+            return_value={"_id": "game-1", "category": "fountain_pens", "mode": "beta", "model_state": {}}
+        )
+        service._ensure_model = AsyncMock(return_value=model)
+        service._get_products_by_ids = AsyncMock(return_value=[{"_id": "p1", "vendor": "Pilot"}])
+        game_row = SimpleNamespace(model_state=None, updated_at=None)
+        db = _ServiceDB(scalar_results=[game_row])
+
+        result = await service.submit_feedback(db, "game-1", "p1", "less_like_this")
+
+        self.assertEqual(result, {"accepted": True, "action": "less_like_this", "product_id": "p1"})
+        self.assertEqual(db.commits, 1)
+        self.assertIn("p1", game_row.model_state["disliked_ids"])
+        self.assertIn("p1", game_row.model_state["negative_ids"])
+
+    async def test_submit_seed_preferences_marks_state_as_seeded(self):
+        service = GameService()
+        model = _MutationModel()
+        service._get_game = AsyncMock(
+            return_value={"_id": "game-1", "category": "fountain_pens", "mode": "beta", "model_state": {}}
+        )
+        service._ensure_model = AsyncMock(return_value=model)
+        service._apply_seed_preferences_to_state = AsyncMock(
+            side_effect=lambda db, model, state, **kwargs: {**state, "applied_seed_likes": kwargs["likes"]}
+        )
+        game_row = SimpleNamespace(model_state=None, updated_at=None)
+        db = _ServiceDB(scalar_results=[game_row])
+
+        result = await service.submit_seed_preferences(
+            db,
+            "game-1",
+            likes={"vendor": ["Pilot"]},
+            dislike_product_ids=["p9"],
+        )
+
+        self.assertEqual(result, {"accepted": True})
+        self.assertTrue(game_row.model_state["seeded"])
+        self.assertEqual(game_row.model_state["seed_preferences"]["likes"], {"vendor": ["Pilot"]})
+        self.assertEqual(game_row.model_state["seed_preferences"]["dislike_product_ids"], ["p9"])
+        self.assertEqual(db.commits, 1)
+
+    async def test_update_preferences_rebuilds_state_and_restarts_active_round(self):
+        service = GameService()
+        model = _MutationModel()
+        game = {
+            "_id": "game-7",
+            "schema_version": 3,
+            "category": "fountain_pens",
+            "status": "playing",
+            "current_round": 1,
+            "human_score": 1,
+            "onboarding_selected_ids": ["p1", "p2"],
+            "onboarding_rating": 5,
+            "model_state": {
+                "seeded": True,
+                "seed_preferences": {"likes": {"vendor": ["Pilot"]}, "dislikes": {}, "like_product_ids": [], "dislike_product_ids": []},
+                "disliked_ids": ["p9"],
+                "disliked_tokens": ["blue"],
+                "rounds_played": 1,
+                "total_matches": 1,
+                "current_match_streak": 1,
+                "longest_match_streak": 1,
+                "match_streak_target": 4,
+            },
+        }
+        service._get_game = AsyncMock(return_value=game)
+        service._ensure_model = AsyncMock(return_value=model)
+        service._historical_selection_sequence = AsyncMock(return_value=["p1", "p2", "p3"])
+        service._apply_seed_preferences_to_state = AsyncMock(side_effect=lambda db, model, state, **kwargs: state)
+        service._get_products_by_ids = AsyncMock(return_value=[{"_id": "p2"}, {"_id": "p3"}])
+        service._preference_deck = AsyncMock(return_value=[{"id": "p2"}, {"id": "p3"}])
+        service.start_round = AsyncMock(return_value={"round_number": 2})
+        game_row = SimpleNamespace(model_state=None, updated_at=None)
+        active_round = SimpleNamespace(round_number=2, completed=False)
+        db = _ServiceDB(scalar_results=[game_row, active_round])
+
+        result = await service.update_preferences(db, "game-7", active_preference_ids=["p2", "bad", "p3", "p2"])
+
+        self.assertEqual(result["game_id"], "game-7")
+        self.assertEqual(result["preference_deck"], [{"id": "p2"}, {"id": "p3"}])
+        self.assertEqual(result["round"], {"round_number": 2})
+        self.assertEqual(game_row.model_state["active_preference_ids"], ["p2", "p3"])
+        self.assertEqual(game_row.model_state["rating"], 5)
+        self.assertEqual(game_row.model_state["disliked_ids"], ["p9"])
+        self.assertEqual(db.deleted, [active_round])
+        self.assertEqual(db.commits, 1)
+        service.start_round.assert_awaited_once_with(db, "game-7")
 
 
 if __name__ == "__main__":
