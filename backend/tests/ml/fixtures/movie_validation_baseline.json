@@ -1,0 +1,21 @@
+{
+  "source": "curated_fixture",
+  "metrics": {
+    "precision_at_k": 0.6,
+    "ndcg_at_k": 0.9837339917445846,
+    "hit_rate": 1.0,
+    "candidate_diversity": 5.0
+  },
+  "feature_space": {
+    "feature_count": 198,
+    "nonzero_ratio": 1.0
+  },
+  "tolerances": {
+    "precision_at_k": 0.2,
+    "ndcg_at_k": 0.15,
+    "hit_rate": 0.0,
+    "candidate_diversity": 0.0,
+    "feature_count": 0.1,
+    "nonzero_ratio": 0.05
+  }
+}
