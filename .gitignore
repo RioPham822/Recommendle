@@ -23,6 +23,7 @@ backend/.env.*
 # ── Claude / Copilot ──
 .claude/
 .codex/
+AGENTS.md
 output/
 .playwright-mcp/
 

@@ -27,6 +27,9 @@ export default function WelcomeScreen({
   categories = [],
   selectedCategory,
   setSelectedCategory,
+  personas = [],
+  selectedPersonaId = '',
+  setSelectedPersonaId,
   onStart,
   onStartFresh,
   loading,
@@ -40,6 +43,9 @@ export default function WelcomeScreen({
   onViewPlayer,
 }) {
   const activeCategory = categories.find((entry) => entry.id === selectedCategory);
+  const categoryPersonas = personas.filter((entry) => entry.category === selectedCategory);
+  const activePersona = categoryPersonas.find((entry) => entry.id === selectedPersonaId) || null;
+  const personaSelected = Boolean(activePersona);
   const readyCount = categories.filter((entry) => entry.available_count >= 100).length;
   const showDatasetLoading = categoriesLoading || readyCount < categories.length;
 
@@ -119,6 +125,45 @@ export default function WelcomeScreen({
             </div>
           </div>
 
+          <div className="welcome-panel__block">
+            <div className="welcome-panel__heading">
+              <div>
+                <p className="eyebrow">Optional shortcut</p>
+                <h2>Start from a persona</h2>
+              </div>
+              <span className="welcome-panel__count">
+                {activePersona?.display_name || 'Custom onboarding'}
+              </span>
+            </div>
+            <div className="persona-start-grid">
+              <button
+                type="button"
+                className={`persona-start-card ${selectedPersonaId ? '' : 'active'}`}
+                onClick={() => setSelectedPersonaId('')}
+              >
+                <strong>Custom onboarding</strong>
+                <p>Start from scratch, seed preferences if you want, and build your own onboarding set.</p>
+              </button>
+              {categoryPersonas.map((persona) => (
+                <button
+                  key={persona.id}
+                  type="button"
+                  className={`persona-start-card ${selectedPersonaId === persona.id ? 'active' : ''}`}
+                  onClick={() => setSelectedPersonaId(persona.id)}
+                >
+                  <strong>{persona.display_name}</strong>
+                  <p>{persona.summary}</p>
+                  <span className="persona-start-card__meta">
+                    Completed in {persona.rounds_to_complete || 0} rounds
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="welcome-panel__hint">
+              Choose a persona to skip onboarding and continue from an admin-prepared completed profile.
+            </p>
+          </div>
+
           {showDatasetLoading && (
             <div className="dataset-loading" role="status" aria-live="polite">
               <div className="dataset-loading__header">
@@ -141,15 +186,15 @@ export default function WelcomeScreen({
               onClick={onStart}
               disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !activeCategory}
             >
-              {loading ? 'Starting...' : resumable?.exists ? 'Continue run' : 'Start training'}
+              {loading ? 'Starting...' : personaSelected ? `Start Fresh As ${activePersona.display_name}` : resumable?.exists ? 'Continue run' : 'Start training'}
             </button>
             <button
               type="button"
               className="secondary-btn"
               onClick={onStartFresh}
-              disabled={loading || categoriesLoading || resumeLoading || !playerName.trim() || !resumable?.can_start_fresh}
+              disabled={personaSelected || loading || categoriesLoading || resumeLoading || !playerName.trim() || !resumable?.can_start_fresh}
             >
-              Start fresh
+              {personaSelected ? 'Persona Selected' : 'Start fresh'}
             </button>
           </div>
 
@@ -157,7 +202,9 @@ export default function WelcomeScreen({
             <div className="welcome-panel__resume">
               <strong>Resume ready</strong>
               <p>
-                Continue from round {(resumable.current_round || 0) + 1}.
+                {personaSelected
+                  ? 'A persona is selected, so the main button will start a new fresh run from that persona.'
+                  : `Continue from round ${(resumable.current_round || 0) + 1}.`}
               </p>
             </div>
           )}

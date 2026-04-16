@@ -26,14 +26,16 @@ from ..schemas_game import (
     PlayerGameEntry,
     PreferenceUpdateOut,
     PreferenceUpdateSubmit,
+    PublicPersonaOut,
     ResumableGameOut,
     RoundPickSubmit,
     RoundResultOut,
     RoundRefreshSubmit,
     RoundStartOut,
 )
-from ..services.game_service import game_service
 from ..services.auth import get_optional_current_user
+from ..services.game_service import game_service
+from ..services.persona_simulation import persona_simulation_service
 
 router = APIRouter(prefix="/api/game", tags=["game"])
 
@@ -44,6 +46,14 @@ async def get_categories(
 ):
     """List supported categories and available inventory counts."""
     return await game_service.get_categories(db)
+
+
+@router.get("/personas", response_model=List[PublicPersonaOut])
+async def get_public_personas(
+    category: str | None = None,
+):
+    """List available persona starting profiles for users."""
+    return await persona_simulation_service.list_public_personas(category=category)
 
 
 @router.get("/leaderboard", response_model=List[LeaderboardEntry])
@@ -89,6 +99,16 @@ async def start_game(
             total_rounds=5,
             fresh_start=payload.fresh_start,
         )
+        if payload.persona_id and game.get("status") == "onboarding" and not game.get("resumed"):
+            persona_info = await persona_simulation_service.prepare_game_from_persona(
+                db,
+                game_id=game["id"],
+                persona_id=payload.persona_id,
+            )
+            refreshed_game = await game_service._get_game(db, game["id"])
+            game = game_service._game_out_payload(refreshed_game, resumed=False)
+            game["persona_id"] = persona_info["persona_id"]
+            game["persona_name"] = persona_info["persona_name"]
         return GameOut(**game)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

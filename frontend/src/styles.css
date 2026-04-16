@@ -528,6 +528,41 @@ tbody td {
   gap: 0.75rem;
 }
 
+.persona-start-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.persona-start-card {
+  display: grid;
+  gap: 0.45rem;
+  border-radius: 20px;
+  padding: 0.95rem;
+  text-align: left;
+  background: color-mix(in srgb, var(--surface-muted) 85%, transparent);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.persona-start-card.active {
+  background: linear-gradient(135deg, rgba(63, 137, 196, 0.14), rgba(35, 110, 160, 0.08));
+  border-color: color-mix(in srgb, var(--cool) 45%, transparent);
+}
+
+.persona-start-card p {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.persona-start-card__meta {
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
 .category-card {
   display: grid;
   gap: 0.45rem;
@@ -2773,9 +2808,230 @@ body[data-theme='dark'] .admin-link-button {
   color: #fff;
 }
 
+.persona-admin-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.persona-admin-layout--library {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.persona-admin-sidebar,
+.persona-admin-main,
+.persona-launch-panel,
+.persona-library,
+.persona-run-detail {
+  display: grid;
+  gap: 1rem;
+  align-self: start;
+}
+
+.persona-library__header,
+.persona-run-board__header,
+.persona-run-detail__hero,
+.persona-run-event__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.persona-library__list,
+.persona-run-board__list,
+.persona-run-events,
+.persona-pref-group__rows,
+.persona-run-choice-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.persona-library__list {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.persona-card,
+.persona-run-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 95%, black 5%);
+  color: var(--ink);
+  text-align: left;
+}
+
+.persona-card.active,
+.persona-run-card.active {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.persona-card__header,
+.persona-run-card__header,
+.persona-pref-group__row,
+.persona-run-detail__timeline-header,
+.persona-run-choice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.persona-card__summary,
+.persona-run-card p,
+.persona-run-detail__hero p {
+  color: var(--ink-soft);
+}
+
+.persona-pref-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.persona-pref-group__row strong,
+.persona-run-event__round {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.persona-run-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.persona-run-status--completed {
+  background: rgba(44, 140, 87, 0.14);
+  border-color: rgba(44, 140, 87, 0.28);
+}
+
+.persona-run-status--failed,
+.persona-run-status--max_rounds_reached {
+  background: rgba(196, 65, 65, 0.14);
+  border-color: rgba(196, 65, 65, 0.28);
+}
+
+.persona-run-status--running,
+.persona-run-status--starting,
+.persona-run-status--seeding,
+.persona-run-status--onboarding {
+  background: rgba(196, 129, 51, 0.14);
+  border-color: rgba(196, 129, 51, 0.26);
+}
+
+.persona-run-card__metrics,
+.persona-run-detail__hero-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.persona-run-card__metrics span,
+.persona-run-detail__hero-metrics span {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.persona-run-card__error {
+  color: #a83c3c;
+  font-weight: 700;
+}
+
+.persona-run-card__profile-tag {
+  color: var(--success);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.persona-run-detail--empty {
+  min-height: 300px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.persona-run-detail__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.85rem;
+}
+
+.persona-run-detail__stats article,
+.persona-run-event,
+.persona-run-choice {
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 95%, black 5%);
+}
+
+.persona-run-detail__stats article {
+  padding: 0.95rem;
+}
+
+.persona-run-detail__chips,
+.persona-run-detail__timeline,
+.persona-run-detail__recommendations {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.persona-run-detail__helper {
+  color: var(--ink-soft);
+}
+
+.persona-run-event {
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.persona-run-choice {
+  padding: 0.65rem 0.8rem;
+}
+
+.persona-recommendation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.persona-recommendation-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 95%, black 5%);
+}
+
+.persona-recommendation-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.persona-recommendation-card p {
+  color: var(--ink-soft);
+}
+
 @media (max-width: 1100px) {
   .admin-users-layout,
-  .admin-ml-grid {
+  .admin-ml-grid,
+  .persona-admin-layout {
     grid-template-columns: 1fr;
   }
 
@@ -2793,7 +3049,15 @@ body[data-theme='dark'] .admin-link-button {
 @media (max-width: 900px) {
   .admin-screen__header,
   .admin-user-detail__header,
-  .admin-ml-card__header {
+  .admin-ml-card__header,
+  .persona-library__header,
+  .persona-run-board__header,
+  .persona-run-detail__hero,
+  .persona-run-event__head,
+  .persona-card__header,
+  .persona-run-card__header,
+  .persona-pref-group__row,
+  .persona-run-detail__timeline-header {
     flex-direction: column;
   }
 
