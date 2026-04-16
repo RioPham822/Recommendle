@@ -105,7 +105,7 @@ Notes:
 - `GET /api/products/{product_id}`
 
 Notes:
-- movie search and product visibility are filtered by the backend so low-vote movie records are hidden from normal gameplay/search
+- movie search and product visibility are filtered by the backend so movie records with TMDB `vote_count < 1000` are hidden from normal gameplay/search
 
 ## Admin API
 

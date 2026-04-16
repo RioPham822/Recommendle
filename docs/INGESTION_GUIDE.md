@@ -39,7 +39,8 @@ Required setup:
   - ignore the checkpoint file and rebuild the candidate pool from scratch
 - `--min-vote-count <int>`
   - hard quality filter for minimum TMDB `vote_count`
-  - default: `20`
+  - default: `1000`
+  - this now matches the backend movie visibility threshold used by normal search/gameplay
 - `--max-candidates <int>`
   - maximum candidate ids to evaluate before final selection
   - default: `2500`
