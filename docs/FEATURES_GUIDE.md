@@ -31,12 +31,13 @@ Frontend readiness rule:
 Current frontend flow:
 1. The player signs in.
 2. The player selects a category.
-3. The frontend starts a `beta` game session.
-4. The player can optionally seed likes and dislikes before onboarding.
-5. The player completes onboarding from a 100-item pool.
-6. The player rates the onboarding set.
-7. The player plays AI-vs-human rounds until the model reaches the configured preference-match streak target.
-8. The player sees a final summary and leaderboard context.
+3. The player either starts from custom onboarding or chooses a ready persona profile.
+4. The frontend starts a `beta` game session.
+5. For custom runs, the player can optionally seed likes and dislikes before onboarding.
+6. For custom runs, the player completes onboarding from a 100-item pool and rates the onboarding set.
+7. For persona runs, the app copies the admin-prepared persona profile into a fresh game and skips onboarding.
+8. The player plays AI-vs-human rounds until the model reaches the configured preference-match streak target.
+9. The player sees a final summary and leaderboard context.
 
 Current rules:
 - onboarding pool size: 100 items
@@ -44,6 +45,23 @@ Current rules:
 - round candidates: 10
 - default preference-match streak target: 5
 - the run can finish in more than 5 rounds if the AI does not keep its streak alive
+
+## Persona Starts
+
+Implemented behavior:
+- admins can launch bundled persona simulations from the admin screen
+- simulations run in beta mode, seed persona likes/dislikes, complete onboarding, and play rounds automatically
+- the latest successful simulation for a persona becomes that persona's playable profile
+- players can choose a ready persona on the welcome screen to start from that completed profile instead of doing onboarding
+- public persona options are category-scoped and only include personas with completed playable profiles
+
+Relevant endpoints:
+- `GET /api/game/personas`
+- `POST /api/game/start` with `persona_id`
+- `GET /api/admin/personas`
+- `POST /api/admin/persona-runs`
+- `GET /api/admin/persona-runs`
+- `GET /api/admin/persona-runs/{run_id}`
 
 ## Beta Features
 
@@ -91,6 +109,7 @@ Admin capabilities exposed by the backend and frontend:
 - delete a user
 - inspect and export category product catalogs
 - view and update ML config values
+- launch persona simulations and inspect run status, events, metrics, and final summaries
 
 ## Data Utilities
 

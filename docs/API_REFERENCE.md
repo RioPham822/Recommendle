@@ -68,6 +68,7 @@ Invalidates one session token.
 ### Core session endpoints
 
 - `GET /api/game/categories`
+- `GET /api/game/personas?category=movies`
 - `POST /api/game/start`
 - `GET /api/game/resume-state?player_name=...&category=...`
 - `GET /api/game/{game_id}/status`
@@ -95,6 +96,8 @@ Invalidates one session token.
 
 Notes:
 - `POST /api/game/start` and `GET /api/game/resume-state` will bind to the authenticated user display name when auth headers are present.
+- `GET /api/game/personas` returns only completed, playable persona profiles. Use `category` to filter the list.
+- `POST /api/game/start` accepts an optional `persona_id`. When present, the backend copies that persona's latest completed profile into the fresh game and returns a ready game that skips onboarding.
 - `seed` and `feedback` are only valid for `beta` mode sessions.
 - `preferences` editing is only valid after onboarding has completed for redesigned sessions.
 
@@ -121,12 +124,32 @@ All admin routes require valid auth headers for an admin user.
 - `GET /api/admin/categories`
 - `GET /api/admin/products?category=...`
 - `GET /api/admin/products/export?category=...`
+- `GET /api/admin/personas`
+- `POST /api/admin/persona-runs`
+- `GET /api/admin/persona-runs?limit=40`
+- `GET /api/admin/persona-runs/{run_id}`
 
 Admin product query params:
 - `category` is required
 - `search` is optional
 - `filters` is optional JSON
 - `limit`, `offset`, `sort_field`, `sort_dir` are supported
+
+Admin persona simulation notes:
+- `GET /api/admin/personas` returns the bundled persona definitions.
+- `POST /api/admin/persona-runs` starts a background simulation and supersedes older active runs for the same persona.
+- A successful run refreshes the persona's canonical playable profile for public starts.
+- Run details include status, timeline events, metrics, game status, and final summary when available.
+
+Persona run launch body:
+
+```json
+{
+  "persona_id": "action-thriller-mainstream",
+  "match_streak_target": 5,
+  "max_rounds": 40
+}
+```
 
 ## Local Utility Script
 
@@ -157,6 +180,14 @@ Start a game:
 curl -X POST http://localhost:8015/api/game/start \
   -H "Content-Type: application/json" \
   -d "{\"player_name\":\"Alice\",\"category\":\"fountain_pens\",\"mode\":\"beta\"}"
+```
+
+Start from a ready persona:
+
+```bash
+curl -X POST http://localhost:8015/api/game/start \
+  -H "Content-Type: application/json" \
+  -d "{\"player_name\":\"Alice\",\"category\":\"movies\",\"mode\":\"beta\",\"fresh_start\":true,\"persona_id\":\"action-thriller-mainstream\"}"
 ```
 
 Fetch categories:
