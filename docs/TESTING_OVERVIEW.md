@@ -42,6 +42,24 @@ This structure makes it easier to understand what is being tested and why.
 
 Representative test files live under [backend/tests](../backend/tests/).
 
+## How To Run The Backend Tests
+
+Run the backend unit test suite from `backend/`:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Generate coverage while omitting the `tests` directory itself and ingestion-oriented `scripts` modules:
+
+```bash
+python -m coverage run --omit="tests/*,scripts/*" -m unittest discover -s tests -v
+python -m coverage report --omit="tests/*,scripts/*"
+python -m coverage html --omit="tests/*,scripts/*"
+```
+
+The HTML report is written to `backend/htmlcov/index.html`.
+
 ## What We Test In General
 
 ### 1. API and Data Consistency Tests

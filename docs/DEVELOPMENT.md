@@ -130,6 +130,17 @@ cd backend
 python -m unittest discover -s tests -v
 ```
 
+Backend coverage report:
+
+```bash
+cd backend
+python -m coverage run --omit="tests/*,scripts/*" -m unittest discover -s tests -v
+python -m coverage report --omit="tests/*,scripts/*"
+python -m coverage html --omit="tests/*,scripts/*"
+```
+
+The HTML coverage report is generated at `backend/htmlcov/index.html`.
+
 Compile sanity:
 
 ```bash
