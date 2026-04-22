@@ -115,6 +115,29 @@ export async function listAdminCategories() {
   return request('/api/admin/categories');
 }
 
+export async function listAdminPersonas() {
+  return request('/api/admin/personas');
+}
+
+export async function listPersonaRuns(limit = 40) {
+  return request(`/api/admin/persona-runs?limit=${limit}`);
+}
+
+export async function createPersonaRun({ personaId, matchStreakTarget = 5, maxRounds = 40 }) {
+  return request('/api/admin/persona-runs', {
+    method: 'POST',
+    body: JSON.stringify({
+      persona_id: personaId,
+      match_streak_target: matchStreakTarget,
+      max_rounds: maxRounds,
+    }),
+  });
+}
+
+export async function getPersonaRunDetail(runId) {
+  return request(`/api/admin/persona-runs/${runId}`);
+}
+
 export async function listAdminProducts({
   category,
   search = '',
@@ -189,11 +212,17 @@ export async function logoutUser(userId, sessionToken) {
 
 // ============ GAME ENDPOINTS ============
 
-export async function startGame(playerName, category = 'fountain_pens', freshStart = false, mode = 'classic') {
+export async function startGame(playerName, category = 'fountain_pens', freshStart = false, mode = 'classic', personaId = null) {
   return request('/api/game/start', {
     method: 'POST',
-    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart, mode }),
+    body: JSON.stringify({ player_name: playerName, category, fresh_start: freshStart, mode, persona_id: personaId }),
   });
+}
+
+export async function getPublicPersonas(category = '') {
+  const params = new URLSearchParams();
+  if (category) params.set('category', category);
+  return request(`/api/game/personas${params.toString() ? `?${params.toString()}` : ''}`);
 }
 
 export async function getCategories() {

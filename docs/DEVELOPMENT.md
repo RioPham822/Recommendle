@@ -16,6 +16,7 @@ Request flow:
 3. Core gameplay lives in `backend/app/services/game_service.py` plus the mixins in `game_play.py` and `game_insights.py`.
 4. Recommendation state is built with category-aware features from `backend/app/category_profiles.py`.
 5. Model refresh and shared recommendation state live in `backend/app/services/recommender.py`.
+6. Persona simulation and playable persona profile refreshes live in `backend/app/services/persona_simulation.py`.
 
 ## Current Product Surface
 
@@ -26,12 +27,14 @@ Implemented:
 - Admin APIs and frontend admin screen.
 - Classic gameplay plus beta-mode preference seeding.
 - Editable preference deck during active redesigned sessions.
+- Admin-generated persona profiles that players can start from instead of onboarding.
 - Hidden preference detection and end-of-game explainability.
 
 Important runtime details:
 - The frontend currently starts games in `beta` mode from `frontend/src/App.jsx`.
 - Categories need at least 100 visible items before the frontend will treat them as ready.
 - Onboarding serves a 100-item pool and allows selecting 1 to 10 items.
+- Persona starts require a completed canonical persona profile created by a successful admin simulation.
 - Standard rounds currently show 10 candidates.
 
 ## Data Model
@@ -42,6 +45,8 @@ Primary Postgres tables:
 - `games`
 - `game_rounds`
 - `prefix_ratings`
+- `persona_simulation_runs`
+- `persona_profiles`
 
 Product records are category-aware:
 - `ProductRecord.category` stores the normalized category id.
@@ -51,6 +56,12 @@ Schema and startup helpers:
 - `backend/app/services/schema_service.py`
 - `backend/app/services/ml_config.py`
 - `backend/app/services/recommender.py`
+
+Persona implementation notes:
+- bundled persona definitions live in `backend/app/personas.py`
+- admin simulations create normal beta game sessions under generated persona player names
+- run state and event timelines are stored in `persona_simulation_runs`
+- the latest successful run refreshes `persona_profiles`, which is what public persona starts copy into new user games
 
 ## Local Workflows
 

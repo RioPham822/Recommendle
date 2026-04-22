@@ -26,6 +26,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
+from app.visibility import MOVIE_MIN_VISIBLE_VOTE_COUNT
+
 DATA_DIR = ROOT_DIR / "data"
 CHECKPOINT_PATH = DATA_DIR / "tmdb_ingest_checkpoint.json"
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
@@ -848,7 +850,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-year", type=int, default=1950, help="Earliest release year to scan")
     parser.add_argument("--end-year", type=int, default=datetime.now().year, help="Latest release year to start from")
     parser.add_argument("--no-resume", action="store_true", help="Ignore checkpoint and start fresh")
-    parser.add_argument("--min-vote-count", type=int, default=20, help="Hard quality filter: minimum vote_count")
+    parser.add_argument(
+        "--min-vote-count",
+        type=int,
+        default=MOVIE_MIN_VISIBLE_VOTE_COUNT,
+        help="Hard quality filter: minimum vote_count",
+    )
     parser.add_argument(
         "--max-candidates",
         type=int,

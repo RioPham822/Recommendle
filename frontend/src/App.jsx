@@ -22,6 +22,7 @@ import {
   getDisplayName,
   getLeaderboard,
   getOnboarding,
+  getPublicPersonas,
   getResumeState,
   getUserRole,
   getUserId,
@@ -72,6 +73,8 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('fountain_pens');
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoryLoadError, setCategoryLoadError] = useState('');
+  const [publicPersonas, setPublicPersonas] = useState([]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState('');
   const [game, setGame] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -181,6 +184,30 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    async function loadPublicPersonas() {
+      try {
+        const payload = await getPublicPersonas(selectedCategory);
+        if (!cancelled) {
+          setPublicPersonas(Array.isArray(payload) ? payload : []);
+          setSelectedPersonaId((previous) => (
+            (Array.isArray(payload) && payload.some((persona) => persona.id === previous)) ? previous : ''
+          ));
+        }
+      } catch {
+        if (!cancelled) {
+          setPublicPersonas([]);
+          setSelectedPersonaId('');
+        }
+      }
+    }
+    loadPublicPersonas();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadResumeState() {
       if (!isAuthenticated || view !== VIEW.WELCOME || categoriesLoading || !playerName.trim()) {
         setResumeLoading(false);
@@ -270,6 +297,7 @@ export default function App() {
     setPreviousHiddenPreferenceNames([]);
     setLessLikeIds([]);
     setSeedPreferences(null);
+    setSelectedPersonaId('');
     setError('');
     setResumableGame(null);
     setResumeLoading(false);
@@ -303,7 +331,7 @@ export default function App() {
 
     setBusy((previous) => ({ ...previous, start: true }));
     try {
-      const created = await startGame(playerName.trim(), selectedCategory, freshStart, TRAINING_MODE);
+      const created = await startGame(playerName.trim(), selectedCategory, freshStart, TRAINING_MODE, selectedPersonaId || null);
       setGame(created);
       setOnboarding(null);
       setSeedPreferences(null);
@@ -607,6 +635,9 @@ export default function App() {
               categories={categories}
               selectedCategory={selectedCategory}
               setSelectedCategory={setSelectedCategory}
+              personas={publicPersonas}
+              selectedPersonaId={selectedPersonaId}
+              setSelectedPersonaId={setSelectedPersonaId}
               onStart={() => handleStart(false)}
               onStartFresh={() => handleStart(true)}
               resumable={resumableGame}
