@@ -32,14 +32,13 @@ from .services.auth import auth_service
 from .services.ml_config import ml_config_service
 from .services.recommender import recommender
 from .services.schema_service import ensure_multicategory_compatibility
+from .visibility import MOVIE_MIN_VISIBLE_VOTE_COUNT, movie_is_visible
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"
 FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
-MIN_MOVIE_VOTE_COUNT = 1000
-
 app = FastAPI(title="Decidio Prototype (Postgres)")
 
 # CORS configuration: allow Render production and local development
@@ -134,15 +133,7 @@ def _normalize_text(text: str) -> str:
 def _filter_visible_products(products: list[dict], category: str) -> list[dict]:
     if category != "movies":
         return products
-    visible: list[dict] = []
-    for product in products:
-        try:
-            vote_count = int(product.get("vote_count") or 0)
-        except (TypeError, ValueError):
-            vote_count = 0
-        if vote_count >= MIN_MOVIE_VOTE_COUNT:
-            visible.append(product)
-    return visible
+    return [product for product in products if movie_is_visible(product, min_vote_count=MOVIE_MIN_VISIBLE_VOTE_COUNT)]
 
 
 @app.get("/api/products/search", response_model=list[ProductOut])

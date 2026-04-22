@@ -39,6 +39,7 @@ class GameCreate(BaseModel):
     category: str = Field(default="fountain_pens")
     mode: str = Field(default="classic")
     fresh_start: bool = Field(default=False)
+    persona_id: str | None = None
 
 
 class GameOut(BaseModel):
@@ -57,6 +58,8 @@ class GameOut(BaseModel):
     longest_match_streak: int = 0
     match_streak_target: int = 5
     rounds_played: int = 0
+    persona_id: str | None = None
+    persona_name: str | None = None
     created_at: datetime
     resumed: bool = False
 
@@ -337,6 +340,18 @@ class CategoryOut(BaseModel):
     item_singular: str
     item_plural: str
     available_count: int
+
+
+class PublicPersonaOut(BaseModel):
+    """Persona option that users can start from without onboarding."""
+
+    id: str
+    category: str
+    display_name: str
+    summary: str
+    rounds_to_complete: int = 0
+    match_rate: float = 0.0
+    last_refreshed_at: datetime | None = None
 
 
 class PreferenceUpdateSubmit(BaseModel):

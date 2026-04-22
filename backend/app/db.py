@@ -164,6 +164,49 @@ class AppConfigRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
+class PersonaSimulationRunRecord(Base):
+    """Stored admin persona simulation run state and event timeline."""
+
+    __tablename__ = "persona_simulation_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    persona_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    persona_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    game_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    persona_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class PersonaProfileRecord(Base):
+    """Canonical playable snapshot produced by the latest successful run of a persona."""
+
+    __tablename__ = "persona_profiles"
+
+    persona_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    persona_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    source_run_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    source_game_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    persona_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    model_state: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    onboarding_selected_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    onboarding_rating: Mapped[int | None] = mapped_column(Integer)
+    rounds_to_complete: Mapped[int] = mapped_column(Integer, default=0)
+    match_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    longest_match_streak: Mapped[int] = mapped_column(Integer, default=0)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
 def record_to_dict(record: Any) -> dict[str, Any]:
     """Normalize ORM row into existing dict shape expected by services."""
     if isinstance(record, ProductRecord):
@@ -242,6 +285,24 @@ async def init_db() -> None:
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_data_vendor ON products((data->>'vendor'))"))
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_rounds_game_created ON game_rounds(game_id, created_at DESC)")
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_persona_runs_status_created "
+                "ON persona_simulation_runs(status, created_at DESC)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_persona_runs_category_created "
+                "ON persona_simulation_runs(category, created_at DESC)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_persona_profiles_category_updated "
+                "ON persona_profiles(category, updated_at DESC)"
+            )
         )
 
 

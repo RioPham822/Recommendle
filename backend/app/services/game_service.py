@@ -31,6 +31,7 @@ from ..db import (
 )
 from ..ml.prefix_cf import PrefixCFModel
 from ..services.recommender import recommender
+from ..visibility import MOVIE_MIN_VISIBLE_VOTE_COUNT, movie_is_visible
 from .game_insights import GameInsightsMixin
 from .game_play import GamePlayMixin
 
@@ -41,7 +42,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
     REDESIGN_SCHEMA_VERSION = 3
     LEGACY_SCHEMA_VERSION = 2
     DEFAULT_MATCH_STREAK_TARGET = 5
-    MIN_MOVIE_VOTE_COUNT = 1000
+    MIN_MOVIE_VOTE_COUNT = MOVIE_MIN_VISIBLE_VOTE_COUNT
 
     def __init__(self):
         """Initialize shared recommender and in-memory scoring cache."""
@@ -85,15 +86,7 @@ class GameService(GamePlayMixin, GameInsightsMixin):
     def _filter_visible_products(cls, products: list[dict[str, Any]], category: str) -> list[dict[str, Any]]:
         if category != "movies":
             return products
-        visible: list[dict[str, Any]] = []
-        for product in products:
-            try:
-                vote_count = int(product.get("vote_count") or 0)
-            except (TypeError, ValueError):
-                vote_count = 0
-            if vote_count >= cls.MIN_MOVIE_VOTE_COUNT:
-                visible.append(product)
-        return visible
+        return [product for product in products if movie_is_visible(product, min_vote_count=cls.MIN_MOVIE_VOTE_COUNT)]
 
     @classmethod
     def _is_redesigned_game(cls, game: dict[str, Any] | None) -> bool:

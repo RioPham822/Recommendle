@@ -16,9 +16,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..category_profiles import category_display_schema, get_category_profile, humanize_feature_list, normalize_category, supported_categories
 from ..db import GameRecord, GameRoundRecord, PrefixRatingRecord, ProductRecord, UserRecord, get_db, record_to_dict
+from ..schemas_persona import (
+    PersonaDefinitionOut,
+    PersonaSimulationLaunchRequest,
+    PersonaSimulationRunDetailOut,
+    PersonaSimulationRunOut,
+)
 from ..services.auth import active_session_tokens, auth_service, require_admin
 from ..services.ml_config import DEFAULT_ML_CONFIG, ml_config_service
 from ..services.game_service import game_service
+from ..services.persona_simulation import persona_simulation_service
 from ..services.recommender import recommender
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -666,3 +673,48 @@ async def export_products(
 @router.get("/categories")
 async def list_admin_categories(_: UserRecord = Depends(require_admin)):
     return [{"id": value, "display_name": get_category_profile(value).display_name} for value in supported_categories()]
+
+
+@router.get("/personas", response_model=list[PersonaDefinitionOut])
+async def list_admin_personas(_: UserRecord = Depends(require_admin)):
+    return await persona_simulation_service.list_persona_definitions()
+
+
+@router.get("/persona-runs", response_model=list[PersonaSimulationRunOut])
+async def list_persona_runs(
+    limit: int = Query(default=40, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: UserRecord = Depends(require_admin),
+):
+    return await persona_simulation_service.list_runs(db, limit=limit)
+
+
+@router.post("/persona-runs", response_model=PersonaSimulationRunDetailOut)
+async def launch_persona_run(
+    payload: PersonaSimulationLaunchRequest,
+    db: AsyncSession = Depends(get_db),
+    _: UserRecord = Depends(require_admin),
+):
+    try:
+        return await persona_simulation_service.launch_run(
+            db,
+            persona_id=payload.persona_id,
+            match_streak_target=payload.match_streak_target,
+            max_rounds=payload.max_rounds,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Persona not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/persona-runs/{run_id}", response_model=PersonaSimulationRunDetailOut)
+async def get_persona_run_detail(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: UserRecord = Depends(require_admin),
+):
+    try:
+        return await persona_simulation_service.get_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
